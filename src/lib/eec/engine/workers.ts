@@ -125,7 +125,8 @@ async function runtimeLoopTick(): Promise<void> {
   const tick = (globalForWorkers.__eecTick = (globalForWorkers.__eecTick ?? 0) + 1)
   for (const rt of alive) {
     await db.agentRuntime.update({ where: { id: rt.id }, data: { lastHeartbeatAt: new Date() } }).catch(() => undefined)
-    await db.agent.updateMany({ where: { id: rt.agentId, healthStatus: { not: 'HEALTHY' } }, data: { healthStatus: 'HEALTHY', lastHeartbeatAt: new Date() } }).catch(() => undefined)
+    // heartbeat del agente se refresca siempre que su runtime esté vivo (dato honesto y fresco)
+    await db.agent.updateMany({ where: { id: rt.agentId }, data: { healthStatus: 'HEALTHY', lastHeartbeatAt: new Date() } }).catch(() => undefined)
   }
   if (tick % 6 === 0) {
     for (const rt of alive) {
