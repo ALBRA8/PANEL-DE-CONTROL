@@ -1,0 +1,700 @@
+// ============================================================
+// EEC — ENTERPRISE EXECUTION & CONTROL CENTER
+// Data Model (Prisma / SQLite)
+//
+// Source of truth operacional. La UI jamás escribe estado directo:
+// todo cambio pasa por Commands → Events → State.
+// SQLite no soporta enums Prisma: los estados se validan en
+// src/lib/eec/domain/types.ts (única fuente de catálogos).
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============ ORGANIZACIÓN ============
+
+model Organization {
+  id         String       @id @default(cuid())
+  code       String       @unique
+  name       String
+  mission    String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  departments Department[]
+  projects   Project[]
+}
+
+model Department {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  name           String
+  description    String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime @default(now())
+  agents         Agent[]
+}
+
+model Location {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String
+  // HQ | DEPARTMENT | OFFICE | BOARDROOM | CONTROL_CENTER | ARCHIVE | LOUNGE | WORLD_GATE | MEETING_ROOM | EXTERNAL
+  type        String
+  // Coordenadas de grilla para el visual (posicionamiento, no verdad operativa)
+  x           Int     @default(0)
+  y           Int     @default(0)
+  capacity    Int     @default(1)
+  departmentId String?
+  metadataJson String? @default("{}")
+  createdAt   DateTime @default(now())
+  officeAgents Agent[] @relation("AgentOffice")
+  occupants   Agent[] @relation("AgentLocation")
+  meetings    Meeting[]
+}
+
+// ============ AGENTES / RUNTIME / SESIÓN / RUN ============
+
+model Agent {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  role            String
+  description     String?
+  version         String   @default("1.0.0")
+  // clave del provider en ProviderRegistry (ej: local-sim) — nunca hardcodear proveedor
+  provider        String   @default("local-sim")
+  endpoint        String?
+  capabilitiesJson String  @default("[]")
+  skillsJson      String   @default("[]")
+  communicationJson String @default("{}")
+  providerConfigJson String @default("{}")
+  // Estado operacional (AgentState) — separado de actividad/tarea/ubicación
+  state           String   @default("OFFLINE")
+  activity        String?
+  locationId      String?
+  location        Location? @relation("AgentLocation", fields: [locationId], references: [id])
+  officeId        String?
+  office          Location? @relation("AgentOffice", fields: [officeId], references: [id])
+  departmentId    String?
+  department      Department? @relation(fields: [departmentId], references: [id])
+  currentTaskId   String?
+  healthStatus    String   @default("UNKNOWN")
+  lastHeartbeatAt DateTime?
+  registrationJson String  @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  runtimes        AgentRuntime[]
+  sessions        Session[]
+  runs            Run[]
+  tasks           Task[]  @relation("TaskAssignee")
+  memories        MemoryRecord[]
+  meetingParts    MeetingParticipant[]
+}
+
+model AgentRuntime {
+  id              String    @id @default(cuid())
+  agentId         String
+  agent           Agent     @relation(fields: [agentId], references: [id])
+  provider        String    @default("local-sim")
+  // CREATED|STARTING|READY|RUNNING|IDLE|STOPPING|STOPPED|ERROR|CRASHED|UNHEALTHY|RECOVERING
+  status          String    @default("CREATED")
+  endpoint        String?
+  processRef      String?
+  health          String    @default("UNKNOWN")
+  restarts        Int       @default(0)
+  lastHeartbeatAt DateTime?
+  startedAt       DateTime?
+  stoppedAt       DateTime?
+  metadataJson    String    @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  sessions        Session[]
+}
+
+model Session {
+  id          String       @id @default(cuid())
+  agentId     String
+  agent       Agent        @relation(fields: [agentId], references: [id])
+  runtimeId   String?
+  runtime     AgentRuntime? @relation(fields: [runtimeId], references: [id])
+  // CREATED|INITIALIZING|ACTIVE|PAUSED|RESUMED|COMPLETED|INTERRUPTED|FAILED
+  status      String       @default("CREATED")
+  purpose     String?
+  contextJson String       @default("{}")
+  traceId     String?
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime     @default(now())
+  runs        Run[]
+}
+
+model Run {
+  id            String    @id @default(cuid())
+  sessionId     String?
+  session       Session?  @relation(fields: [sessionId], references: [id])
+  taskId        String?
+  task          Task?     @relation(fields: [taskId], references: [id])
+  workflowId    String?
+  workflow      Workflow? @relation(fields: [workflowId], references: [id])
+  agentId       String?
+  agent         Agent?    @relation(fields: [agentId], references: [id])
+  // PENDING|RUNNING|WAITING_APPROVAL|SUCCEEDED|FAILED|CANCELLED|TIMED_OUT
+  status        String    @default("PENDING")
+  currentNode   String?
+  progress      Int       @default(0)
+  contextJson   String    @default("{}")
+  outputsJson   String    @default("{}")
+  error         String?
+  traceId       String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+model Task {
+  id              String    @id @default(cuid())
+  code            String    @unique
+  title           String
+  description     String?
+  projectId       String?
+  project         Project?  @relation(fields: [projectId], references: [id])
+  workflowId      String?
+  workflowNode    String?
+  assigneeAgentId String?
+  assignee        Agent?    @relation("TaskAssignee", fields: [assigneeAgentId], references: [id])
+  // INBOX|BACKLOG|TODO|IN_PROGRESS|REVIEW|QUALITY_REVIEW|DONE|BLOCKED|CANCELLED|FAILED
+  status          String    @default("INBOX")
+  priority        String    @default("MEDIUM")
+  risk            String    @default("LOW")
+  dueAt           DateTime?
+  resultJson      String    @default("{}")
+  tagsJson        String    @default("[]")
+  createdById     String?
+  traceId         String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  runs            Run[]
+}
+
+// ============ WORKFLOW ============
+
+model Workflow {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  version       String   @default("1.0.0")
+  description   String?
+  // DRAFT|ACTIVE|PAUSED|RETIRED
+  status        String   @default("ACTIVE")
+  // { trigger, nodes[], conditions, approvals, timeouts, retryPolicy, completionRules }
+  definitionJson String   @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  runs          Run[]
+}
+
+// ============ EVENTOS / COMANDOS / AUDIT / OBSERVABILITY ============
+
+model EventRecord {
+  // seq es el cursor de streaming; id es el event_id del envelope
+  seq           Int       @id @default(autoincrement())
+  id            String    @unique @default(cuid())
+  type          String
+  version       String    @default("1.0")
+  source        String
+  subject       String
+  correlationId String?
+  causationId   String?
+  traceId       String?
+  spanId        String?
+  payloadJson   String    @default("{}")
+  metadataJson  String    @default("{}")
+  // PENDING|PROCESSED|FAILED|DEAD_LETTER
+  status        String    @default("PENDING")
+  retryCount    Int       @default(0)
+  sim           Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  processedAt   DateTime?
+
+  @@index([type])
+  @@index([createdAt])
+  @@index([correlationId])
+  @@index([subject])
+}
+
+model CommandRecord {
+  id               String    @id @default(cuid())
+  type             String
+  payloadJson      String    @default("{}")
+  requesterId      String?
+  requesterType    String    @default("HUMAN")
+  // RECEIVED|VALIDATED|AUTHORIZED|POLICY_CHECKED|DISPATCHED|EXECUTED|REJECTED|FAILED|DUPLICATE
+  status           String    @default("RECEIVED")
+  rejectionReason  String?
+  resultJson       String?
+  idempotencyKey   String?   @unique
+  correlationId    String?
+  traceId          String?
+  risk             String    @default("LOW")
+  requiredApprovalId String?
+  sim              Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  executedAt       DateTime?
+
+  @@index([type])
+  @@index([status])
+}
+
+model AuditRecord {
+  id             String   @id @default(cuid())
+  actorId        String
+  actorType      String
+  action         String
+  entityType     String
+  entityId       String
+  why            String?
+  inputJson      String?
+  outputJson     String?
+  toolsJson      String?
+  permissionsJson String?
+  result         String?
+  cost           Float?
+  traceId        String?
+  correlationId  String?
+  sim            Boolean  @default(false)
+  // cadena inmutable: correcciones = nuevo registro apuntando al previo
+  prevAuditId    String?
+  createdAt      DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model Span {
+  id             String   @id @default(cuid())
+  traceId        String
+  spanId         String   @unique
+  parentSpanId   String?
+  name           String
+  service        String
+  // OK|ERROR
+  status         String   @default("OK")
+  attributesJson String   @default("{}")
+  startedAt      DateTime @default(now())
+  endedAt        DateTime?
+}
+
+model Metric {
+  id          String   @id @default(cuid())
+  name        String
+  labelsJson  String   @default("{}")
+  value       Float
+  unit        String?
+  ts          DateTime @default(now())
+
+  @@index([name, ts])
+}
+
+model LogRecord {
+  id          String   @id @default(cuid())
+  level       String
+  message     String
+  service     String
+  traceId     String?
+  spanId      String?
+  contextJson String   @default("{}")
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ============ TOOLS / CAPABILITY GATEWAY ============
+
+model Tool {
+  id            String  @id @default(cuid())
+  code          String  @unique
+  name          String
+  version       String  @default("1.0.0")
+  capability    String
+  provider      String  @default("builtin")
+  description   String?
+  schemasJson   String  @default("{}")
+  permissionsJson String @default("[]")
+  // LOW|MEDIUM|HIGH|CRITICAL
+  risk          String  @default("LOW")
+  timeoutMs     Int     @default(30000)
+  costEstimate  Float   @default(0)
+  auditPolicy   String  @default("FULL")
+  // AVAILABLE|DISABLED
+  status        String  @default("AVAILABLE")
+  createdAt     DateTime @default(now())
+}
+
+model ToolInvocation {
+  id            String    @id @default(cuid())
+  toolId        String
+  toolCode      String
+  agentId       String?
+  taskId        String?
+  runId         String?
+  // REQUESTED|CHECKING|CHECKS_FAILED|EXECUTING|SUCCEEDED|FAILED|TIMEOUT|DENIED|SUPPRESSED_SIM
+  status        String    @default("REQUESTED")
+  inputJson     String    @default("{}")
+  outputJson    String?
+  error         String?
+  latencyMs     Int?
+  cost          Float?
+  approvedById  String?
+  sim           Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+}
+
+// ============ PERMISOS / POLÍTICAS ============
+
+model Policy {
+  id            String  @id @default(cuid())
+  code          String  @unique
+  name          String
+  description   String?
+  // PERMISSION|RISK|APPROVAL|NOTIFICATION|DATA_CLASS|RATE
+  type          String
+  effect        String  @default("ALLOW")
+  subjectJson   String  @default("{}")
+  resourceJson  String  @default("{}")
+  actionJson    String  @default("{}")
+  conditionsJson String @default("{}")
+  priority      Int     @default(100)
+  enabled       Boolean @default(true)
+  createdAt     DateTime @default(now())
+}
+
+model Permission {
+  id          String    @id @default(cuid())
+  agentId     String?
+  roleId      String?
+  capability  String
+  resource    String
+  action      String
+  effect      String    @default("ALLOW")
+  // quien otorga — un agente jamás se otorga permisos a sí mismo
+  grantedById String?
+  policyId    String?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model Role {
+  id          String @id @default(cuid())
+  code        String @unique
+  name        String
+  description String?
+}
+
+// ============ APROBACIONES (HUMAN OVERSIGHT) ============
+
+model Approval {
+  id            String    @id @default(cuid())
+  requestType   String
+  subjectType   String?
+  subjectId     String?
+  title         String
+  description   String?
+  risk          String    @default("HIGH")
+  payloadJson   String    @default("{}")
+  requestedById String?
+  // REQUESTED|APPROVED|REJECTED|EXPIRED|CANCELLED
+  status        String    @default("REQUESTED")
+  decidedById   String?
+  decidedAt     DateTime?
+  expiresAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime  @default(now())
+}
+
+// ============ MEMORIA / CONOCIMIENTO / ARTEFACTOS ============
+
+model MemoryRecord {
+  id              String    @id @default(cuid())
+  agentId         String?
+  agent           Agent?    @relation(fields: [agentId], references: [id])
+  // SHORT_TERM_CONTEXT|WORKING_CONTEXT|LONG_TERM_MEMORY|ORGANIZATIONAL_MEMORY
+  scope           String
+  // OBSERVATION|DECISION|FACT|SUMMARY|PREFERENCE|EPISODE
+  kind            String    @default("OBSERVATION")
+  content         String
+  importance      Int       @default(5)
+  provenanceJson  String    @default("{}")
+  // clasificación de datos: PUBLIC|INTERNAL|CONFIDENTIAL|RESTRICTED|SECRET
+  classification  String    @default("INTERNAL")
+  permissionsJson String    @default("{}")
+  tagsJson        String    @default("[]")
+  expiresAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([agentId, scope])
+}
+
+model KnowledgeItem {
+  id             String   @id @default(cuid())
+  title          String
+  // DOCUMENT|DATABASE|WEB|INTERNAL_SYSTEM|CLIENT_DATA|DOMAIN
+  sourceType     String
+  sourceRef      String?
+  content        String
+  classification String   @default("INTERNAL")
+  tagsJson       String   @default("[]")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Artifact {
+  id           String   @id @default(cuid())
+  type         String
+  name         String
+  uri          String
+  mimeType     String?
+  size         Int      @default(0)
+  createdById  String?
+  metadataJson String   @default("{}")
+  createdAt    DateTime @default(now())
+}
+
+// ============ PROYECTOS ============
+
+model Project {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  name           String
+  objective      String?
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  departmentId   String?
+  ownerId        String?
+  // PLANNING|ACTIVE|PAUSED|COMPLETED|CANCELLED
+  status         String   @default("ACTIVE")
+  milestonesJson String   @default("[]")
+  metricsJson    String   @default("{}")
+  risksJson      String   @default("[]")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  tasks          Task[]
+}
+
+// ============ CRM ============
+
+model Client {
+  id            String   @id @default(cuid())
+  name          String
+  segment       String?
+  // Pipeline comercial global: PROSPECT|CONTACTED|QUALIFIED|OPPORTUNITY|NEGOTIATION|CLIENT|RETENTION
+  stage         String   @default("PROSPECT")
+  contactName   String?
+  contactEmail  String?
+  notes         String?
+  ownerAgentId  String?
+  healthScore   Int?
+  tagsJson      String   @default("[]")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  contacts      Contact[]
+  opportunities Opportunity[]
+  interactions  Interaction[]
+}
+
+model Contact {
+  id       String  @id @default(cuid())
+  clientId String
+  client   Client  @relation(fields: [clientId], references: [id])
+  name     String
+  email    String?
+  phone    String?
+  role     String?
+  createdAt DateTime @default(now())
+}
+
+model Opportunity {
+  id              String    @id @default(cuid())
+  clientId        String
+  client          Client    @relation(fields: [clientId], references: [id])
+  name            String
+  // PROSPECT|CONTACTED|QUALIFIED|NEGOTIATION|WON|LOST
+  stage           String    @default("PROSPECT")
+  value           Float     @default(0)
+  currency        String    @default("USD")
+  probability     Int       @default(20)
+  ownerAgentId    String?
+  expectedCloseAt DateTime?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Interaction {
+  id            String   @id @default(cuid())
+  clientId      String?
+  client        Client?  @relation(fields: [clientId], references: [id])
+  contactId     String?
+  opportunityId String?
+  agentId       String?
+  // EMAIL|CALL|MEETING|CHAT|WEBHOOK
+  channel       String
+  summary       String
+  occurredAt    DateTime @default(now())
+  createdAt     DateTime @default(now())
+}
+
+// ============ CALENDARIO / MEETINGS ============
+
+model CalendarEvent {
+  id              String    @id @default(cuid())
+  title           String
+  // MEETING|DEADLINE|SCHEDULED_RUN|REMINDER|FOCUS_BLOCK
+  type            String
+  startAt         DateTime
+  endAt           DateTime?
+  allDay          Boolean   @default(false)
+  recurrenceJson  String?
+  timezone        String    @default("UTC")
+  locationId      String?
+  relatedType     String?
+  relatedId       String?
+  // SCHEDULED|CONFIRMED|CANCELLED|COMPLETED
+  status          String    @default("SCHEDULED")
+  reminderMinutes Int?
+  metadataJson    String    @default("{}")
+  createdAt       DateTime  @default(now())
+}
+
+model Meeting {
+  id                String    @id @default(cuid())
+  code              String    @unique
+  title             String
+  objective         String?
+  agendaJson        String    @default("[]")
+  // SCHEDULED|INVITED|IN_PROGRESS|COMPLETED|CANCELLED
+  status            String    @default("SCHEDULED")
+  organizerAgentId  String?
+  locationId        String?
+  location          Location? @relation(fields: [locationId], references: [id])
+  scheduledStartAt  DateTime
+  scheduledEndAt    DateTime?
+  startedAt         DateTime?
+  endedAt           DateTime?
+  decisionsJson     String    @default("[]")
+  actionItemsJson   String    @default("[]")
+  result            String?
+  calendarEventId   String?
+  conversationId    String?
+  createdAt         DateTime  @default(now())
+  participants      MeetingParticipant[]
+}
+
+model MeetingParticipant {
+  id        String   @id @default(cuid())
+  meetingId String
+  meeting   Meeting  @relation(fields: [meetingId], references: [id])
+  agentId   String?
+  agent     Agent?   @relation(fields: [agentId], references: [id])
+  humanName String?
+  // ORGANIZER|PARTICIPANT|OBSERVER
+  role      String   @default("PARTICIPANT")
+  // PENDING|ACCEPTED|DECLINED|TENTATIVE
+  response  String   @default("PENDING")
+  joinedAt  DateTime?
+  leftAt    DateTime?
+}
+
+// ============ CONVERSACIONES ============
+
+model Conversation {
+  id           String    @id @default(cuid())
+  title        String?
+  // DIRECT|MEETING|TASK|SYSTEM
+  channel      String    @default("DIRECT")
+  agentId      String?
+  clientId     String?
+  taskId       String?
+  meetingId    String?
+  // OPEN|CLOSED
+  status       String    @default("OPEN")
+  contextJson  String    @default("{}")
+  createdAt    DateTime  @default(now())
+  endedAt      DateTime?
+  messages     Message[]
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  // AGENT|HUMAN|SYSTEM
+  senderType     String
+  senderId       String?
+  senderName     String?
+  content        String
+  metadataJson   String   @default("{}")
+  createdAt      DateTime @default(now())
+}
+
+// ============ SCHEDULER ============
+
+model Schedule {
+  id                  String    @id @default(cuid())
+  name                String
+  // ONE_TIME|RECURRING|EVENT_TRIGGERED|DEPENDENCY_TRIGGERED|DEADLINE_TRIGGERED
+  kind                String
+  // cron (RECURRING), ISO datetime (ONE_TIME), patrón de evento, o JSON de dependencia
+  expression          String
+  timezone            String    @default("UTC")
+  commandType         String
+  commandPayloadJson  String    @default("{}")
+  enabled             Boolean   @default(true)
+  lastRunAt           DateTime?
+  nextRunAt           DateTime?
+  dependsOnJson       String?
+  createdAt           DateTime  @default(now())
+}
+
+// ============ PROVIDERS ============
+
+model Provider {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  // AGENT|ORCHESTRATOR|RUNTIME|MODEL|TOOL|MEMORY|KNOWLEDGE|NOTIFICATION|STORAGE
+  type        String
+  adapter     String
+  // config sanitizada — jamás secretos
+  configJson  String   @default("{}")
+  // AVAILABLE|UNAVAILABLE|DISABLED
+  status      String   @default("AVAILABLE")
+  health      String   @default("UNKNOWN")
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+// ============ NOTIFICACIONES ============
+
+model Notification {
+  id           String    @id @default(cuid())
+  type         String
+  // INFO|WARNING|ERROR|CRITICAL
+  severity     String    @default("INFO")
+  title        String
+  body         String?
+  channelsJson String    @default("[\"UI\"]")
+  subjectType  String?
+  subjectId    String?
+  recipientId  String?
+  readAt       DateTime?
+  sim          Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+}
