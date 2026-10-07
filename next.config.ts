@@ -2,7 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  /* config options here */
+  // Oculta el indicador flotante de Dev Tools de Next.js (la "N" del DOM)
+  devIndicators: false,
   typescript: {
     ignoreBuildErrors: true,
   },
