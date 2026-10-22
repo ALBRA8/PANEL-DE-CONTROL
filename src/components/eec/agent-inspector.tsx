@@ -123,12 +123,40 @@ interface DetailToolInvocation {
   createdAt: string
 }
 
+// EEC V2 §8: evidencia de ejecución real (proceso) + declarado vs observado
+interface DetailExecution {
+  id: string
+  runId: string
+  status: string
+  pid: number | null
+  executable: string
+  exitCode: number | null
+  signal: string | null
+  durationMs: number | null
+  startedAt: string
+  error: string | null
+  stdoutArtifactId: string | null
+  stderrArtifactId: string | null
+}
+
+interface AgentObservability {
+  providerKind: 'REAL' | 'SIMULADO' | 'DESCONOCIDO'
+  manifest: { contractVersion: string; identity: { name: string; version: string; owner: string }; runtimeType: string; capabilities: Array<{ op: string; risk: string }>; limits: { timeoutMs: number; maxRetries: number } } | null
+  manifestError: string | null
+  declaredState: string
+  observedHealth: string
+  lastHeartbeatAt: string | null
+  runtimeStatus: string
+}
+
 interface AgentDetail {
   agent: DetailAgent
   permissions: DetailPermission[]
   conversations: DetailConversation[]
   toolInvocations: DetailToolInvocation[]
-  metrics: { totalRuns: number; successfulRuns: number; failedRuns: number; memories: number }
+  executions?: DetailExecution[]
+  observability?: AgentObservability
+  metrics: { totalRuns: number; successfulRuns: number; failedRuns: number; unreconciledRuns?: number; memories: number }
 }
 
 // ---------- Paletas locales (sin azul/índigo) ----------
@@ -606,6 +634,64 @@ function AgentDetailContent({ detail }: { detail: AgentDetail }) {
 
       <Separator className="bg-slate-800" />
 
+      {/* EEC V2 §8: declarado vs observado + ejecuciones reales */}
+      {obs && (
+        <section className="space-y-2">
+          <SectionTitle>Observabilidad operativa</SectionTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className={cn(
+              'border',
+              obs.providerKind === 'REAL' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                : obs.providerKind === 'SIMULADO' ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                : 'border-rose-500/40 bg-rose-500/10 text-rose-300',
+            )}>
+              provider: {obs.providerKind}
+            </Badge>
+            <Badge className="border border-slate-700 bg-slate-800/60 text-slate-300">
+              runtime: {obs.runtimeStatus}
+            </Badge>
+            <Badge className={cn(
+              'border',
+              obs.observedHealth === 'HEALTHY' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                : obs.observedHealth === 'UNHEALTHY' ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+                : 'border-slate-700 bg-slate-800/60 text-slate-400',
+            )}>
+              salud observada: {obs.observedHealth === 'UNKNOWN' ? 'NO COMPROBADA' : obs.observedHealth}
+            </Badge>
+          </div>
+          {obs.manifest ? (
+            <div className="rounded-md border border-slate-800 bg-slate-900/60 p-2.5 font-mono text-[11px] text-slate-400">
+              <p className="text-slate-300">DECLARADO (manifiesto {obs.manifest.contractVersion}): {obs.manifest.identity.name} v{obs.manifest.identity.version} · {obs.manifest.identity.owner}</p>
+              <p>transporte: {obs.manifest.runtimeType} · timeout: {obs.manifest.limits.timeoutMs}ms · reintentos: {obs.manifest.limits.maxRetries}</p>
+              <p>capacidades: {obs.manifest.capabilities.map(c => `${c.op}(${c.risk})`).join(', ')}</p>
+            </div>
+          ) : (
+            <p className="text-[11px] text-slate-500">Sin manifiesto del contrato de agentes — agente sin contrato declarado{obs.manifestError ? ` (${obs.manifestError})` : ''}.</p>
+          )}
+          {(detail?.executions?.length ?? 0) > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[11px] uppercase tracking-wider text-slate-500">Procesos reales (evidencia)</p>
+              {detail!.executions!.map(ex => (
+                <div key={ex.id} className="rounded-md border border-slate-800 bg-slate-900/60 p-2 font-mono text-[11px] text-slate-400">
+                  <span className={cn(
+                    ex.status === 'EXITED' ? 'text-emerald-400' : ex.status === 'ALIVE' ? 'text-teal-300' : 'text-rose-400',
+                  )}>{ex.status}</span>
+                  {' '}pid={ex.pid ?? '—'} exit={ex.exitCode ?? '—'}{ex.signal ? ` sig=${ex.signal}` : ''}
+                  {ex.durationMs != null ? ` · ${(ex.durationMs / 1000).toFixed(1)}s` : ''}
+                  <span className="text-slate-600"> · {ex.executable.split('/').pop()}</span>
+                  {ex.error && <span className="text-rose-400"> · {ex.error.slice(0, 120)}</span>}
+                  {(ex.stdoutArtifactId || ex.stderrArtifactId) && (
+                    <span className="text-slate-600"> · evidencia: {[ex.stdoutArtifactId, ex.stderrArtifactId].filter(Boolean).map(x => x!.slice(-6)).join('/')}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      <Separator className="bg-slate-800" />
+
       {/* Sesiones recientes */}
       <section className="space-y-2">
         <SectionTitle>Sesiones recientes</SectionTitle>
@@ -824,6 +910,7 @@ function AgentDetailContent({ detail }: { detail: AgentDetail }) {
 
 function AgentDetailPanel({ agentId }: { agentId: string }) {
   const [detail, setDetail] = useState<AgentDetail | null>(null)
+  const obs = detail?.observability
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 

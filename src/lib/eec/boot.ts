@@ -4,6 +4,9 @@
 // ============================================================
 import { providerRegistry } from './domain/contracts'
 import { LocalSimAgentAdapter, LocalOrchestratorAdapter, LocalRuntimeAdapter, BuiltinToolsAdapter } from './providers/adapters/local-sim'
+import { LocalProcessAgentAdapter, reconcileProcessesAfterBoot } from './providers/adapters/local-process'
+import { HttpAgentAdapter } from './providers/adapters/http-agent'
+import { HttpInstaladorAdapter, UnavailableInstaladorAdapter } from './providers/adapters/instalador'
 import { ensureHandlersRegistered, setSimulationMode } from './commands'
 import { startWorkers } from './engine/workers'
 import { db } from '../db'
@@ -26,6 +29,22 @@ export async function bootEEC(): Promise<void> {
   }
   if (providerRegistry.list('TOOL').length === 0) {
     providerRegistry.register('TOOL', 'builtin', new BuiltinToolsAdapter(), { isDefault: true, adapter: 'BuiltinToolsAdapter' })
+  }
+  // ---------- RUNTIMES REALES (EEC V2 §4) — NO default: requieren manifiesto
+  // válido y credenciales; jamás sustituyen silenciosamente a la simulación ----------
+  if (!providerRegistry.list('AGENT').some(p => p.key === 'local-process')) {
+    providerRegistry.register('AGENT', 'local-process', new LocalProcessAgentAdapter(), { adapter: 'LocalProcessAgentAdapter' })
+  }
+  if (!providerRegistry.list('AGENT').some(p => p.key === 'http-agent')) {
+    providerRegistry.register('AGENT', 'http-agent', new HttpAgentAdapter(), { adapter: 'HttpAgentAdapter' })
+  }
+  // ---------- FRONTERA INSTALADOR (EEC V2 §7) — honesta por defecto ----------
+  if (providerRegistry.list('LIFECYCLE').length === 0) {
+    if (process.env.EEC_INSTALLADOR_URL) {
+      providerRegistry.register('LIFECYCLE', 'instalador-http', new HttpInstaladorAdapter(), { isDefault: true, adapter: 'HttpInstaladorAdapter' })
+    } else {
+      providerRegistry.register('LIFECYCLE', 'instalador-unavailable', new UnavailableInstaladorAdapter(), { isDefault: true, adapter: 'UnavailableInstaladorAdapter' })
+    }
   }
   // MODEL / MEMORY / KNOWLEDGE / NOTIFICATION / STORAGE: defaults embebidos se
   // resuelven en sus servicios; providers reales se registran aquí vía adapters.
@@ -50,6 +69,16 @@ export async function bootEEC(): Promise<void> {
 
   // ---------- workers (heartbeat, scheduler, runtime loop…) ----------
   startWorkers()
+
+  // ---------- reconciliación de ejecuciones reales tras reinicio (EEC V2 §5.12) ----------
+  // Los runs de adaptadores reales que sobrevivieron a un reinicio sin resultado
+  // validado quedan UNRECONCILED (nunca "completado" inventado).
+  try {
+    const rec = await reconcileProcessesAfterBoot()
+    if (rec.reattached || rec.unreconciled) {
+      console.log(`[EEC] reconciliación post-boot: ${rec.reattached} re-adjuntado(s), ${rec.unreconciled} UNRECONCILED`)
+    }
+  } catch { /* la BD puede aún no tener la tabla en primeros arranques */ }
 
   // ---------- registro de providers en DB para observabilidad (§43) ----------
   for (const p of providerRegistry.list()) {

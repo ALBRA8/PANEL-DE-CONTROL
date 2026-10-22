@@ -2,6 +2,25 @@
 
 Control plane empresarial para orquestar agentes de IA con **human-in-the-loop**: estado único de la verdad (`EEC STATE`), pipeline de comandos con validación/autorización/policy, proveedores neutrales vía adapters, simulación honesta y un mundo visual sincronizado en tiempo real.
 
+## EEC V2 — del panel simulado al centro de control operativo
+
+La rama `feature/eec-v2` evoluciona el sistema a ejecución **real, segura, persistente y observable**:
+
+- **Contrato común de agentes v1.0.0** (`docs/EEC-V2/02-CONTRATO-AGENTES.md`) — manifiesto versionado y validable para agentes heterogéneos (proceso local / servicio HTTP).
+- **Adaptadores de ejecución real** — proceso local con allowlists (sin shell, entrada por stdin, timeout, cancelación SIGTERM→SIGKILL) y servicio HTTP; la simulación sigue disponible pero **nunca se activa silenciosamente**.
+- **Seguridad server-side** — identidad derivada de credenciales (bearer/sesión firmada); el cliente no puede suplantar `HUMAN`/`SYSTEM`; rate-limit, límite de payload, redacción de secretos.
+- **Ciclo de tarea real** — claim atómico, evidencias (pid/exit/stdout), reconciliación post-reinicio (`UNRECONCILED`, nunca "completado" inventado).
+- **Observabilidad** — el panel distingue `REAL | SIMULADO | DESCONOCIDO` y muestra lo declarado vs lo observado.
+- **Frontera INSTALADOR** — contrato versionado preparado; sin conexión real informa "no disponible" (no simula).
+
+```bash
+bun test tests/            # toda la suite (V1 + V2)
+bun run pilot              # piloto E2E de ejecución real (19 comprobaciones)
+bun run test:api-security  # frontera HTTP (16 comprobaciones)
+```
+
+Documentación completa: **`docs/EEC-V2/`** (auditoría, contrato, adaptadores, seguridad, piloto con evidencias, matriz de capacidades y riesgos).
+
 ## Principios de diseño
 
 1. **EEC STATE como única fuente de verdad** — el flujo es siempre
