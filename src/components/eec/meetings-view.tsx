@@ -13,6 +13,10 @@ import { es as localeEs } from 'date-fns/locale'
 import {
   CalendarPlus, ChevronDown, ChevronRight, Crown, DoorOpen, Info, MapPin, Play, Users,
 } from 'lucide-react'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -279,6 +283,8 @@ export default function MeetingsView() {
   const [fDecisions, setFDecisions] = useState('')
   const [fItems, setFItems] = useState('')
   const [fResult, setFResult] = useState('')
+  // confirmación operacional previa a ejecutar meeting.end
+  const [endConfirmOpen, setEndConfirmOpen] = useState(false)
 
   // dialog: programar
   const [createOpen, setCreateOpen] = useState(false)
@@ -319,6 +325,16 @@ export default function MeetingsView() {
 
   const openFinish = (m: EecMeeting) => {
     setFinishMeeting(m); setFDecisions(''); setFItems(''); setFResult('')
+  }
+
+  // validación previa a abrir la confirmación (meeting.end)
+  const validateFinish = (): boolean => {
+    if (!finishMeeting) return false
+    if (fItems.trim() && parseActionItemLines(fItems).length === 0) {
+      toast.error('No se pudo interpretar ninguna action item (formato: título | prioridad)')
+      return false
+    }
+    return true
   }
 
   const submitFinish = async () => {
@@ -447,7 +463,7 @@ export default function MeetingsView() {
       </Collapsible>
 
       {/* ---------- dialog: finalizar reunión ---------- */}
-      <Dialog open={finishMeeting !== null} onOpenChange={(open) => { if (!open) setFinishMeeting(null) }}>
+      <Dialog open={finishMeeting !== null} onOpenChange={(open) => { if (!open) { setFinishMeeting(null); setEndConfirmOpen(false) } }}>
         <DialogContent className="border-slate-800 bg-slate-950 sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="text-slate-100">Finalizar {finishMeeting?.code}</DialogTitle>
@@ -479,12 +495,37 @@ export default function MeetingsView() {
           <DialogFooter>
             <Button variant="outline" className="border-slate-700" onClick={() => setFinishMeeting(null)}>Cancelar</Button>
             <Button className="bg-fuchsia-500 text-fuchsia-950 hover:bg-fuchsia-400" disabled={busy}
-              onClick={() => void submitFinish()}>
+              onClick={() => { if (validateFinish()) setEndConfirmOpen(true) }}>
               Finalizar reunión
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ---------- confirmación operacional: meeting.end ---------- */}
+      <AlertDialog open={endConfirmOpen} onOpenChange={setEndConfirmOpen}>
+        <AlertDialogContent className="border-slate-800 bg-slate-950">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-slate-100">Finalizar {finishMeeting?.code}</AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              Se cerrará la reunión <span className="font-mono text-slate-300">{finishMeeting?.code ?? '—'}</span>. Los agentes volverán
+              a su estado previo y las action items pueden generar tareas reales.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter aria-label="Confirmar o cancelar el cierre de la reunión">
+            <AlertDialogCancel className="h-11 border-slate-700 bg-transparent text-slate-200 hover:bg-slate-800 hover:text-slate-100">
+              Volver al formulario
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="h-11 bg-rose-600 text-white hover:bg-rose-500"
+              disabled={busy}
+              onClick={() => { setEndConfirmOpen(false); void submitFinish() }}
+            >
+              Finalizar reunión
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ---------- dialog: programar reunión ---------- */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

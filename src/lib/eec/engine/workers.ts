@@ -88,6 +88,8 @@ async function runtimeLoopTick(): Promise<void> {
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
+        // observabilidad: stack completa en dev.log para diagnosticar fallos del tick
+        console.error(`[EEC-RUNTIME-LOOP] run:${run.id} (${agent.code}) falló:`, err instanceof Error ? err.stack : err)
         if (msg.includes('EEC_PROVIDER_UNAVAILABLE')) {
           await log('WARN', `provider de agente no disponible: ${agent.provider}`, { agentId: agent.id })
           return
@@ -120,6 +122,40 @@ async function runtimeLoopTick(): Promise<void> {
     }
   }
 
+  // ---- recuperación post-boot: tareas IN_PROGRESS con run vivo y agente IDLE ----
+  // Un reinicio del proceso no pausa el trabajo real que ya está en DB: el agente
+  // asignado retoma su tarea (reanudación honesta; sin run vivo → intervención humana).
+  {
+    const orphanTasks = await db.task.findMany({
+      where: { status: 'IN_PROGRESS', assigneeAgentId: { not: null } },
+      include: { assignee: { include: { runtimes: true } } },
+      take: 10,
+      orderBy: { createdAt: 'asc' },
+    }).catch(() => [] as never[])
+    for (const t of orphanTasks) {
+      const ag = t.assignee
+      if (!ag || ag.state !== 'IDLE' || ag.currentTaskId) continue
+      if (!ag.runtimes.some(r => ['RUNNING', 'READY', 'IDLE'].includes(r.status))) continue
+      const liveRun = await db.run.findFirst({
+        where: { taskId: t.id, status: 'RUNNING' },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (!liveRun) continue // sin run vivo: no se fabrica progreso; queda visible para el humano
+      await db.agent.update({ where: { id: ag.id }, data: { currentTaskId: t.id } }).catch(() => undefined)
+      await withTrace(newTrace({ sim }), async () => {
+        const { setAgentState } = await import('./state')
+        await setAgentState(ag.id, 'WORKING', 'runtime loop: reanudación de tarea IN_PROGRESS tras reinicio', {
+          sim,
+          activity: liveRun.currentNode ? `Reanudando (${liveRun.currentNode})…` : 'Reanudando tarea…',
+        }).catch(() => undefined)
+      })
+      await eventBus.publish({
+        event_type: 'task.resumed', source: 'eec.runtime-loop', subject: `task:${t.id}`,
+        payload: { taskId: t.id, agentId: ag.id, runId: liveRun.id, progress: liveRun.progress }, sim,
+      }).catch(() => undefined)
+    }
+  }
+
   // ---- heartbeats de runtimes vivos (liveness honesta) ----
   const alive = await db.agentRuntime.findMany({ where: { status: { in: ['RUNNING', 'IDLE', 'READY'] } } })
   const tick = (globalForWorkers.__eecTick = (globalForWorkers.__eecTick ?? 0) + 1)
@@ -144,6 +180,22 @@ async function runtimeLoopTick(): Promise<void> {
       const wfRuns = await db.run.findMany({ where: { workflowId: { not: null }, status: 'RUNNING' }, take: 8, orderBy: { createdAt: 'asc' } })
       for (const wr of wfRuns) {
         await advanceWorkflowRun(wr.id, sim).catch(() => undefined)
+      }
+      // ---- sweep de runs huérfanos: RUNNING cuya tarea ya no está IN_PROGRESS ----
+      // (duplicados de carrera o tareas que avanzaron por otro run: cierre honesto y auditado)
+      const staleRuns = await db.run.findMany({ where: { status: 'RUNNING', taskId: { not: null } }, take: 20, orderBy: { createdAt: 'asc' } })
+      for (const sr of staleRuns) {
+        const st = await db.task.findUnique({ where: { id: sr.taskId! } }).catch(() => null)
+        if (!st || st.status === 'IN_PROGRESS') continue
+        const newer = await db.run.findFirst({ where: { taskId: sr.taskId!, status: 'SUCCEEDED' }, orderBy: { createdAt: 'desc' } })
+        await db.run.update({
+          where: { id: sr.id },
+          data: { status: 'CANCELLED', completedAt: new Date(), error: newer ? 'run duplicado: la tarea completó vía otro run' : 'cierre por reconciliación: la tarea ya no está IN_PROGRESS' },
+        }).catch(() => undefined)
+        await eventBus.publish({
+          event_type: 'run.stale.closed', source: 'eec.runtime-loop', subject: `run:${sr.id}`,
+          payload: { runId: sr.id, taskId: sr.taskId, taskStatus: st.status, supersededBy: newer?.id ?? null }, sim,
+        }).catch(() => undefined)
       }
     } catch { /* reconciliación best-effort */ }
   }

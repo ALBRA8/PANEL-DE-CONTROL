@@ -21,6 +21,10 @@ import {
   AGENT_STATE_STYLE, timeAgo,
   type EecAgent, type EecLocation,
 } from '@/lib/eec-client'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardTitle } from '@/components/ui/card'
@@ -172,6 +176,10 @@ export default function WorldView() {
   const [panelOpen, setPanelOpen] = useState(true)
   const [busyMeetingId, setBusyMeetingId] = useState<string | null>(null)
   const [cmdError, setCmdError] = useState<string | null>(null)
+  // confirmación operacional previa a meeting.start / meeting.end
+  const [pendingMeeting, setPendingMeeting] = useState<{
+    id: string; code: string; cmd: 'meeting.start' | 'meeting.end'
+  } | null>(null)
 
   // Movimientos REALES: únicamente eventos agent.location.changed recibidos por el bus.
   const moves = useMemo(
@@ -441,7 +449,7 @@ export default function WorldView() {
                               size="sm"
                               className="h-6 gap-1 border border-emerald-400/30 bg-emerald-400/10 px-2 text-[10px] text-emerald-300 hover:bg-emerald-400/20"
                               disabled={busyMeetingId === m.id}
-                              onClick={() => void runMeetingCommand(m.id, 'meeting.start')}
+                              onClick={() => setPendingMeeting({ id: m.id, code: m.code, cmd: 'meeting.start' })}
                             >
                               <Play className="size-3" /> Iniciar
                             </Button>
@@ -450,7 +458,7 @@ export default function WorldView() {
                               size="sm"
                               className="h-6 gap-1 border border-rose-400/30 bg-rose-400/10 px-2 text-[10px] text-rose-300 hover:bg-rose-400/20"
                               disabled={busyMeetingId === m.id}
-                              onClick={() => void runMeetingCommand(m.id, 'meeting.end')}
+                              onClick={() => setPendingMeeting({ id: m.id, code: m.code, cmd: 'meeting.end' })}
                             >
                               <Square className="size-3" /> Finalizar
                             </Button>
@@ -465,6 +473,46 @@ export default function WorldView() {
           </Card>
         </aside>
       </div>
+
+      {/* ---------- confirmación operacional: meeting.start / meeting.end ---------- */}
+      <AlertDialog open={pendingMeeting !== null} onOpenChange={(open) => { if (!open) setPendingMeeting(null) }}>
+        <AlertDialogContent className="border-slate-800 bg-slate-950">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-slate-100">
+              {pendingMeeting?.cmd === 'meeting.end'
+                ? `Finalizar reunión ${pendingMeeting.code}`
+                : `Iniciar reunión ${pendingMeeting?.code ?? ''}`}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              {pendingMeeting?.cmd === 'meeting.end'
+                ? (
+                    <>
+                      Se cerrará la reunión <span className="font-mono text-slate-300">{pendingMeeting.code}</span>. Los agentes
+                      volverán a su estado previo y las action items pueden generar tareas reales.
+                    </>
+                  )
+                : 'Los agentes invitados pasarán a IN_MEETING; se pausará su trabajo en curso.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter aria-label="Confirmar o cancelar el comando de reunión">
+            <AlertDialogCancel className="h-11 border-slate-700 bg-transparent text-slate-200 hover:bg-slate-800 hover:text-slate-100">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={`h-11 ${pendingMeeting?.cmd === 'meeting.end'
+                ? 'bg-rose-600 text-white hover:bg-rose-500'
+                : 'bg-emerald-500 text-emerald-950 hover:bg-emerald-400'}`}
+              onClick={() => {
+                const p = pendingMeeting
+                setPendingMeeting(null)
+                if (p) void runMeetingCommand(p.id, p.cmd)
+              }}
+            >
+              {pendingMeeting?.cmd === 'meeting.end' ? 'Finalizar' : 'Iniciar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   )
 }

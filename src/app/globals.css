@@ -120,3 +120,52 @@
     @apply bg-background text-foreground;
   }
 }
+
+  /* ============================================================ */
+  /* EEC — MODO CLARO (remapeo de paleta) */
+  /* Las vistas EEC usan utilidades Tailwind (bg-slate-900, text-slate-400…) */
+  /* que compilan a var(--color-*). En modo claro remapeamos esas variables */
+  /* para invertir la relación de contraste SIN tocar los componentes. */
+  /* El modo oscuro (.dark) conserva los valores por defecto de Tailwind. */
+  /* ============================================================ */
+html:not(.dark) {
+  /* ---- neutros: fondos de página/panel → claros; textos → oscuros ---- */
+  --color-slate-950: oklch(0.97 0.002 247); /* fondo de página */
+  --color-slate-900: oklch(1 0 0); /* paneles → blanco */
+  --color-slate-800: oklch(0.955 0.003 247); /* chips/inputs */
+  --color-slate-700: oklch(0.925 0.005 247); /* bordes sutiles */
+  --color-slate-600: oklch(0.85 0.01 247); /* bordes marcados */
+  --color-slate-500: oklch(0.505 0.015 247); /* texto muted (se mantiene medio) */
+  --color-slate-400: oklch(0.45 0.02 247); /* texto secundario */
+  --color-slate-300: oklch(0.38 0.025 247); /* texto destacado */
+  --color-slate-200: oklch(0.30 0.03 247);
+  --color-slate-100: oklch(0.24 0.03 247);
+  /* ---- acentos usados como TEXTO claro sobre oscuro → versiones oscuras ---- */
+  --color-emerald-300: oklch(0.50 0.12 163);
+  --color-emerald-200: oklch(0.42 0.11 163);
+  --color-emerald-100: oklch(0.35 0.09 163);
+  --color-teal-300: oklch(0.50 0.10 195);
+  --color-teal-200: oklch(0.42 0.09 195);
+  --color-teal-100: oklch(0.35 0.07 195);
+  --color-amber-300: oklch(0.55 0.13 70);
+  --color-amber-200: oklch(0.46 0.11 70);
+  --color-amber-100: oklch(0.38 0.09 70);
+  --color-rose-300: oklch(0.52 0.19 15);
+  --color-rose-200: oklch(0.44 0.17 15);
+  --color-violet-300: oklch(0.49 0.22 293);
+  --color-violet-200: oklch(0.42 0.19 293);
+  --color-orange-300: oklch(0.55 0.19 45);
+  --color-fuchsia-300: oklch(0.52 0.22 328);
+  --color-fuchsia-200: oklch(0.44 0.19 328);
+  --color-rose-400: oklch(0.58 0.22 17);
+}
+  /* Casos donde la MISMA tonalidad se usa como fondo vivo (chips) y como texto: */
+  /* los fondos deben seguir vivos en claro, así que remapeamos solo la utilidad texto. */
+html:not(.dark) .text-emerald-400 { color: oklch(0.53 0.14 163); }
+html:not(.dark) .text-teal-400 { color: oklch(0.53 0.11 195); }
+html:not(.dark) .text-amber-400 { color: oklch(0.55 0.13 70); }
+html:not(.dark) .text-violet-400 { color: oklch(0.51 0.23 293); }
+  /* Translúcidos sobre fondo oscuro (bg-slate-900/70 etc.) siguen funcionando */
+  /* porque las variables base ya son claras; ajustamos bordes de página completa. */
+html:not(.dark) .bg-slate-950\/60,
+html:not(.dark) .bg-slate-950\/90 { background-color: oklch(1 0 0 / 85%); }

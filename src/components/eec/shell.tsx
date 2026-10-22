@@ -7,7 +7,7 @@
 // La UI nunca inventa actividad: solo refleja el snapshot y eventos.
 // ============================================================
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import dynamic from 'next/dynamic'
 import { toast } from 'sonner'
 import {
@@ -27,8 +27,12 @@ import {
   Bell,
   Menu,
   Loader2,
+  Sun,
+  Moon,
+  Search,
   type LucideIcon,
 } from 'lucide-react'
+import { useTheme } from 'next-themes'
 
 import { useEecStore, useEecBootstrap, type EecView } from '@/store/eec-store'
 import { SEVERITY_STYLE, timeAgo, type EecRun } from '@/lib/eec-client'
@@ -49,6 +53,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { Toaster } from '@/components/ui/sonner'
+import CommandPalette, { useCommandPaletteStore } from '@/components/eec/command-palette'
 
 // ---------- Vistas (dynamic, ssr:false, con skeleton) ----------
 
@@ -169,7 +174,7 @@ function NavList({
   const pendingApprovals = useEecStore((s) => s.snapshot?.health.approvalsPending ?? 0)
 
   return (
-    <nav aria-label="Navegación EEC" className="eec-scroll flex flex-col gap-0.5 overflow-y-auto p-2">
+    <nav role="navigation" aria-label="Navegación EEC" className="eec-scroll flex flex-col gap-0.5 overflow-y-auto p-2">
       {NAV.map((item) => {
         const Icon = item.icon
         const active = view === item.view
@@ -186,7 +191,7 @@ function NavList({
             title={collapsed ? item.label : undefined}
             className={cn(
               'relative flex min-h-11 w-full items-center gap-3 rounded-md px-2.5 text-sm transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60',
               collapsed && 'justify-center px-0',
               active
                 ? 'bg-emerald-400/10 text-emerald-200'
@@ -210,6 +215,35 @@ function NavList({
         )
       })}
     </nav>
+  )
+}
+
+// ---------- Toggle de tema (claro/oscuro) ----------
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme()
+  // mounted sin setState-en-effect: false en SSR/hidratación, true en cliente.
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  )
+
+  // Sin hydration mismatch: hasta montar se renderiza el icono por defecto (oscuro).
+  const isDark = mounted ? theme === 'dark' : true
+  const next = isDark ? 'claro' : 'oscuro'
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-11 w-11 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 focus-visible:border-emerald-500/60 focus-visible:ring-emerald-500/60"
+      aria-label={mounted ? `Cambiar a modo ${next}` : 'Cambiar tema'}
+      title={mounted ? `Cambiar a modo ${next}` : 'Cambiar tema'}
+      onClick={() => setTheme(isDark ? 'light' : 'dark')}
+    >
+      {isDark ? <Sun className="h-5 w-5" aria-hidden /> : <Moon className="h-5 w-5" aria-hidden />}
+    </Button>
   )
 }
 
@@ -261,13 +295,13 @@ function NotificationsBell() {
         <Button
           variant="ghost"
           size="icon"
-          className="relative h-11 w-11 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+          className="relative h-11 w-11 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 focus-visible:border-emerald-500/60 focus-visible:ring-emerald-500/60"
           aria-label={`Notificaciones (${unread.length} sin leer)`}
         >
           <Bell className="h-5 w-5" />
           {unread.length > 0 && (
             <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 font-mono text-[9px] font-semibold text-white">
-              {unread.length > 9 ? '9+' : unread.length}
+              {unread.length > 99 ? '99+' : unread.length}
             </span>
           )}
         </Button>
@@ -460,6 +494,7 @@ export default function EecShell() {
   const view = useEecStore((s) => s.view)
   const lastError = useEecStore((s) => s.lastError)
   const refresh = useEecStore((s) => s.refresh)
+  const setPaletteOpen = useCommandPaletteStore((s) => s.setOpen)
 
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -513,6 +548,7 @@ export default function EecShell() {
     <div className="flex min-h-screen bg-slate-950 text-slate-100">
       <style dangerouslySetInnerHTML={{ __html: SCROLLBAR_CSS }} />
       <Toaster theme="dark" position="bottom-right" richColors closeButton />
+      <CommandPalette />
 
       {/* Sidebar desktop colapsable */}
       <aside
@@ -536,7 +572,7 @@ export default function EecShell() {
           <Button
             variant="ghost"
             size="icon"
-            className={cn('h-11 w-11 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200', collapsed && 'mx-auto')}
+            className={cn('h-11 w-11 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 focus-visible:border-emerald-500/60 focus-visible:ring-emerald-500/60', collapsed && 'mx-auto')}
             aria-label={collapsed ? 'Expandir menú lateral' : 'Contraer menú lateral'}
             onClick={() => setCollapsed((c) => !c)}
           >
@@ -554,7 +590,7 @@ export default function EecShell() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-11 w-11 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 md:hidden"
+                className="h-11 w-11 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 focus-visible:border-emerald-500/60 focus-visible:ring-emerald-500/60 md:hidden"
                 aria-label="Abrir navegación"
               >
                 <Menu className="h-5 w-5" />
@@ -587,6 +623,24 @@ export default function EecShell() {
           </div>
 
           <div className="ml-auto flex items-center gap-2 md:gap-3">
+            {/* Paleta de comandos (⌘K) */}
+            <Button
+              variant="ghost"
+              className="h-11 w-11 justify-center px-0 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 focus-visible:border-emerald-500/60 focus-visible:ring-emerald-500/60 sm:w-auto sm:px-3"
+              aria-label="Abrir paleta de comandos. Atajos: Ctrl o Cmd más K abre la paleta; Alt más 1 a 9 salta a las primeras 9 vistas."
+              title="Paleta de comandos (⌘K) · Alt+1-9 vistas"
+              onClick={() => setPaletteOpen(true)}
+            >
+              <Search className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="hidden text-xs lg:inline">Comandos</span>
+              <kbd
+                aria-hidden
+                className="hidden rounded border border-slate-700 bg-slate-950/80 px-1.5 py-0.5 font-mono text-[10px] leading-none text-slate-400 md:inline"
+              >
+                ⌘K
+              </kbd>
+            </Button>
+
             {/* Modo simulación */}
             <Badge
               variant="outline"
@@ -607,7 +661,7 @@ export default function EecShell() {
 
             {/* Indicador realtime */}
             <span
-              className="flex items-center gap-1.5 font-mono text-xs"
+              className="hidden min-[440px]:flex items-center gap-1.5 font-mono text-xs"
               title={connected ? 'Realtime conectado (socket.io)' : 'Sin realtime: respaldo por polling'}
             >
               <span
@@ -623,6 +677,10 @@ export default function EecShell() {
             </span>
 
             <Clock />
+
+            <Separator orientation="vertical" className="hidden h-6 bg-slate-800 sm:block" />
+
+            <ThemeToggle />
 
             <Separator orientation="vertical" className="hidden h-6 bg-slate-800 sm:block" />
 
@@ -647,6 +705,7 @@ export default function EecShell() {
 
         <footer className="mt-auto flex items-center justify-between gap-3 border-t border-slate-800/80 px-4 py-2.5 font-mono text-[10px] text-slate-600">
           <span>EEC v1.0 · fuente de verdad: EEC STATE · la UI no fabrica actividad</span>
+          <span className="hidden text-slate-500 sm:inline">⌘K paleta · Alt+1-9 vistas</span>
           <span suppressHydrationWarning>snapshot {timeAgo(snapshot.generatedAt)}</span>
         </footer>
       </div>

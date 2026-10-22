@@ -13,6 +13,10 @@ import {
   Activity, Boxes, CircleDot, Gauge, HeartPulse, RefreshCw, RotateCcw, Star, Wrench,
 } from 'lucide-react'
 
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -166,6 +170,9 @@ export default function OpsView() {
   const [loading, setLoading] = useState(true)
   const [simOn, setSimOn] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  // confirmaciones destructivas: dirección pendiente del switch de simulación y reintento de dead-letters
+  const [simConfirm, setSimConfirm] = useState<'on' | 'off' | null>(null)
+  const [retryConfirmOpen, setRetryConfirmOpen] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -290,7 +297,7 @@ export default function OpsView() {
             </Badge>
             <Switch
               checked={simOn}
-              onCheckedChange={(v) => { void toggleSimulation(v) }}
+              onCheckedChange={(v) => { if (v !== simOn) setSimConfirm(v ? 'on' : 'off') }}
               aria-label="Alternar modo simulación"
               className="data-[state=checked]:bg-amber-400"
             />
@@ -336,7 +343,7 @@ export default function OpsView() {
               variant="outline"
               className="border-amber-400/40 text-amber-300 hover:bg-amber-400/10 hover:text-amber-200"
               disabled={!data || data.deadLetters.length === 0 || retrying}
-              onClick={() => { void retryDeadLetters() }}
+              onClick={() => setRetryConfirmOpen(true)}
             >
               <RotateCcw className={`size-4 ${retrying ? 'animate-spin' : ''}`} aria-hidden />
               Reintentar
@@ -618,6 +625,71 @@ export default function OpsView() {
           </section>
         </TabsContent>
       </Tabs>
+
+      {/* ---------- confirmación: alternar modo simulación (system.simulation.toggle) ---------- */}
+      <AlertDialog open={simConfirm !== null} onOpenChange={(open) => { if (!open) setSimConfirm(null) }}>
+        <AlertDialogContent className="border-slate-800 bg-slate-950">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-slate-100">
+              {simConfirm === 'off' ? 'Desactivar modo simulación' : 'Activar modo simulación'}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              {simConfirm === 'off'
+                ? 'Las herramientas volverán a ejecutarse contra proveedores reales (email, CRM…). Requiere aprobaciones según política.'
+                : 'Las acciones externas se suprimirán y marcarán SIM.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <p className="rounded-md border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+            El cambio queda auditado en el pipeline (comando <span className="font-mono">system.simulation.toggle</span>, actor HUMAN).
+          </p>
+          <AlertDialogFooter aria-label="Confirmar o cancelar el cambio de simulación">
+            <AlertDialogCancel className="h-11 border-slate-700 bg-transparent text-slate-200 hover:bg-slate-800 hover:text-slate-100">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={`h-11 ${simConfirm === 'off'
+                ? 'bg-rose-600 text-white hover:bg-rose-500'
+                : 'bg-amber-400 text-amber-950 hover:bg-amber-300'}`}
+              onClick={() => {
+                const enabled = simConfirm === 'on'
+                setSimConfirm(null)
+                void toggleSimulation(enabled)
+              }}
+            >
+              {simConfirm === 'off' ? 'Pasar a ejecución real' : 'Activar simulación'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ---------- confirmación: reintento de dead-letters (system.deadletter.retry) ---------- */}
+      <AlertDialog open={retryConfirmOpen} onOpenChange={setRetryConfirmOpen}>
+        <AlertDialogContent className="border-slate-800 bg-slate-950">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-slate-100">Reintentar dead-letters</AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              Se reencolarán hasta 50 eventos de la dead-letter queue. Los eventos reintentados vuelven al pipeline completo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <p className="font-mono text-xs text-slate-500">
+            En cola ahora: {data?.deadLetters.length ?? 0}
+          </p>
+          <AlertDialogFooter aria-label="Confirmar o cancelar el reintento">
+            <AlertDialogCancel className="h-11 border-slate-700 bg-transparent text-slate-200 hover:bg-slate-800 hover:text-slate-100">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="h-11 bg-amber-400 text-amber-950 hover:bg-amber-300"
+              onClick={() => {
+                setRetryConfirmOpen(false)
+                void retryDeadLetters()
+              }}
+            >
+              Reintentar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

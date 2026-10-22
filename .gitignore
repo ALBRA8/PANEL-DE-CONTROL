@@ -52,3 +52,17 @@ prompt
 server.log
 # Skills directory
 /skills/
+# ============================================================
+# EEC workspace artifacts (no versionar)
+# ============================================================
+/download/
+/agent-ctx/
+nohup.out
+*.db-journal
+
+# Permitir ejemplo de variables de entorno
+!.env.example
+*.db-shm
+*.db-wal
+/tool-results/
+/worklog.md

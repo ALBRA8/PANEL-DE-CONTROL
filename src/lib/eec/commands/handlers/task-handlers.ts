@@ -63,6 +63,13 @@ export function registerTaskHandlers(): void {
     if (!task.assignee) throw new Error('TASK_UNASSIGNED')
     const agent = task.assignee
 
+    // ---- idempotencia operacional: run vivo existente → no duplicar ----
+    // (doble task.start por auto-pickup + reconciliador de workflows no debe crear 2 runs)
+    const activeRun = await db.run.findFirst({
+      where: { taskId: task.id, status: 'RUNNING' }, orderBy: { createdAt: 'desc' },
+    })
+    if (activeRun) return { runId: activeRun.id, taskId: task.id, agentId: agent.id, deduped: true }
+
     // ---- transición de tarea TODO→IN_PROGRESS ----
     if (!canTaskTransition(task.status, 'IN_PROGRESS')) {
       throw new TransitionError('TASK', task.id, task.status, 'IN_PROGRESS')

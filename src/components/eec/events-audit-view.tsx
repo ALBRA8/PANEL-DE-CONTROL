@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  ChevronDown, GitBranch, History, ListFilter, PenLine, RefreshCw, ScrollText,
+  ChevronDown, Download, GitBranch, History, ListFilter, Pause, PenLine, Play, RefreshCw, ScrollText,
 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -32,7 +32,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useEecStore } from '@/store/eec-store'
-import { RISK_STYLE, timeAgo } from '@/lib/eec-client'
+import { RISK_STYLE, timeAgo, type EecEventItem } from '@/lib/eec-client'
 
 // ---------- tipos locales (formas de la API) ----------
 interface AuditRecordRow {
@@ -158,6 +158,10 @@ export default function EventsAuditView() {
   const [eventQuery, setEventQuery] = useState('')
   const [eventNs, setEventNs] = useState('ALL')
 
+  // ---- feed pausable: congela UNA COPIA para la vista; el buffer del store sigue creciendo ----
+  const [feedPaused, setFeedPaused] = useState(false)
+  const [frozenEvents, setFrozenEvents] = useState<EecEventItem[] | null>(null)
+
   // ---- auditoría ----
   const [auditRecords, setAuditRecords] = useState<AuditRecordRow[]>([])
   const [auditLoading, setAuditLoading] = useState(true)
@@ -245,15 +249,17 @@ export default function EventsAuditView() {
     }
   }, [reconNonce, reconType, reconId, loadReconstruction])
 
-  // ---------- eventos en vivo: filtrado ----------
+  // ---------- eventos en vivo: filtrado (sobre la lista visible, congelada o no) ----------
+  const displayEvents = feedPaused && frozenEvents ? frozenEvents : events
+
   const namespaces = useMemo(
-    () => Array.from(new Set(events.map((e) => nsOf(e.event_type)))).sort(),
-    [events],
+    () => Array.from(new Set(displayEvents.map((e) => nsOf(e.event_type)))).sort(),
+    [displayEvents],
   )
 
   const filteredEvents = useMemo(() => {
     const q = eventQuery.trim().toLowerCase()
-    return events.filter((e) => {
+    return displayEvents.filter((e) => {
       if (eventNs !== 'ALL' && nsOf(e.event_type) !== eventNs) return false
       if (!q) return true
       return (
@@ -262,10 +268,92 @@ export default function EventsAuditView() {
         String(e.seq).includes(q)
       )
     })
-  }, [events, eventQuery, eventNs])
+  }, [displayEvents, eventQuery, eventNs])
 
-  const visibleEvents = filteredEvents.slice(0, 150)
+  const visibleEvents = useMemo(() => filteredEvents.slice(0, 150), [filteredEvents])
   const hiddenEvents = filteredEvents.length - visibleEvents.length
+
+  // Contador honesto de eventos nuevos durante la pausa: delta del seq máximo del buffer (aprox).
+  // (los eventos llegan más-nuevos-primero al store, por eso events[0] es el seq máximo)
+  const newInBuffer = useMemo(() => {
+    if (!feedPaused || !frozenEvents) return 0
+    const frozenMaxSeq = frozenEvents.length > 0 ? frozenEvents[0].seq : 0
+    const currentMaxSeq = events.length > 0 ? events[0].seq : 0
+    return Math.max(0, currentMaxSeq - frozenMaxSeq)
+  }, [feedPaused, frozenEvents, events])
+
+  // Medidor de eventos/s REAL: Δseq / Δtiempo sobre eventos recientes del store (ventana 2 min;
+  // si en la ventana no hay suficientes, se usa la muestra más reciente disponible).
+  const evtRate = useMemo(() => {
+    if (events.length < 2) return 0
+    const now = Date.now()
+    const recent = events.filter((e) => now - new Date(e.timestamp).getTime() <= 120_000)
+    const list = recent.length >= 2 ? recent : events.slice(0, Math.min(events.length, 25))
+    const newest = list[0]
+    const oldest = list[list.length - 1]
+    const newestTs = new Date(newest.timestamp).getTime()
+    const oldestTs = new Date(oldest.timestamp).getTime()
+    const spanSec = Math.max(1, (newestTs - oldestTs) / 1000)
+    const deltaSeq = Math.max(0, newest.seq - oldest.seq)
+    return deltaSeq / spanSec
+  }, [events])
+
+  const evtRateTitle = `Calculado en vivo: Δseq / Δtiempo sobre eventos reales del buffer del store (ventana de 2 min)${
+    connected
+      ? ' — fuente realtime'
+      : ' — SIN realtime (POLL): la tasa refleja lotes de polling y puede subestimar el bus'
+  }`
+
+  const toggleFeedPause = useCallback(() => {
+    if (feedPaused) {
+      setFeedPaused(false)
+      setFrozenEvents(null)
+    } else {
+      // Copia inmutable de lo visible AHORA; el store sigue acumulando por su cuenta.
+      setFrozenEvents(events.slice())
+      setFeedPaused(true)
+    }
+  }, [feedPaused, events])
+
+  // Exporta EXACTAMENTE los eventos filtrados visibles (lo que se ve en la lista).
+  const exportCsv = useCallback(() => {
+    const rows = visibleEvents
+    if (rows.length === 0) {
+      toast.error('No hay eventos visibles para exportar')
+      return
+    }
+    const esc = (v: string | number | boolean): string => {
+      const s = String(v)
+      return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const lines: string[] = ['seq,time,type,namespace,subject,sim']
+    for (const e of rows) {
+      lines.push(
+        [
+          String(e.seq),
+          esc(e.timestamp),
+          esc(e.event_type),
+          esc(nsOf(e.event_type)),
+          esc(e.subject),
+          e.sim ? 'true' : 'false',
+        ].join(','),
+      )
+    }
+    const csv = '\uFEFF' + lines.join('\r\n')
+    const pad = (n: number): string => String(n).padStart(2, '0')
+    const d = new Date()
+    const fileName = `eec-events-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.csv`
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = fileName
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+    toast.success(`CSV exportado — ${rows.length} filas`, { description: fileName })
+  }, [visibleEvents])
 
   // ---------- acciones ----------
   const goToReconstruction = useCallback((entityType: string, entityId: string) => {
@@ -357,6 +445,44 @@ export default function EventsAuditView() {
                 ))}
               </SelectContent>
             </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={toggleFeedPause}
+              aria-label={feedPaused ? 'Reanudar feed de eventos' : 'Pausar feed de eventos'}
+              aria-pressed={feedPaused}
+              className="border-slate-800 bg-slate-900 text-slate-200 hover:bg-slate-800 hover:text-emerald-300"
+            >
+              {feedPaused ? <Play className="size-4" aria-hidden /> : <Pause className="size-4" aria-hidden />}
+              {feedPaused ? 'Reanudar' : 'Pausar feed'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={exportCsv}
+              aria-label="Exportar los eventos filtrados visibles como CSV"
+              className="border-slate-800 bg-slate-900 text-slate-200 hover:bg-slate-800 hover:text-teal-300"
+            >
+              <Download className="size-4" aria-hidden />
+              Exportar CSV
+            </Button>
+            <Badge
+              variant="outline"
+              className="border-teal-400/30 bg-teal-400/10 font-mono text-[10px] text-teal-300"
+              title={evtRateTitle}
+            >
+              ≈{evtRate < 10 ? evtRate.toFixed(1) : String(Math.round(evtRate))} evt/s
+            </Badge>
+            {feedPaused && (
+              <Badge
+                variant="outline"
+                className="animate-pulse border-amber-400/40 bg-amber-400/10 font-mono text-[10px] text-amber-300"
+              >
+                feed pausado — {newInBuffer} eventos nuevos en buffer
+              </Badge>
+            )}
             <Badge variant="outline" className={`font-mono text-[10px] ${connected ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300' : 'border-slate-600/40 bg-slate-500/10 text-slate-400'}`}>
               {connected ? 'realtime conectado' : 'sin realtime (poll)'}
             </Badge>
@@ -365,6 +491,10 @@ export default function EventsAuditView() {
           {events.length === 0 ? (
             <p className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-sm text-slate-500">
               Sin eventos recibidos todavía — el bus emitirá en cuanto haya actividad.
+            </p>
+          ) : feedPaused && displayEvents.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-amber-400/40 p-6 text-center text-sm text-amber-300/80">
+              Feed pausado — la lista congelada está vacía.
             </p>
           ) : filteredEvents.length === 0 ? (
             <p className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-sm text-slate-500">

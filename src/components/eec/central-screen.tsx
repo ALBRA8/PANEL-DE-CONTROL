@@ -1,28 +1,48 @@
 'use client'
 
 // ============================================================
-// EEC — PANTALLA CENTRAL (spec §38)
-// KPIs operacionales + agentes + runs en curso + flujo de eventos
-// en vivo + trabajo bloqueado. SOLO estado real del snapshot.
+// EEC — PANTALLA CENTRAL v2 (spec §38)
+// KPIs operacionales con sparklines de tendencia real + agentes +
+// runs en curso + flujo de eventos en vivo + ritmo de eventos por
+// namespace + trabajo bloqueado.
+// Ley de oro: las tendencias NO se inventan. Se acumulan en memoria
+// del componente a partir de los snapshots que llegan al store
+// (observación honesta, etiquetada "desde la apertura de la vista").
 // ============================================================
 
-import { useMemo } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Bot,
   Activity,
+  BarChart3,
+  Bot,
+  Server,
+  ShieldAlert,
   Stamp,
   Users,
-  ShieldAlert,
-  Server,
   type LucideIcon,
 } from 'lucide-react'
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 
 import { useEecStore } from '@/store/eec-store'
 import {
   AGENT_STATE_STYLE,
+  type EecAgent,
+  type EecApproval,
   type EecEventItem,
+  type EecHealth,
   type EecRun,
   type EecRuntime,
+  type EecSnapshot,
   type EecTask,
 } from '@/lib/eec-client'
 import { cn } from '@/lib/utils'
@@ -94,6 +114,407 @@ function shortClock(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-CO', { hour12: false })
 }
 
+// ---------- Historial real en memoria (observación, no fabricación) ----------
+
+/** Muestra derivada EXCLUSIVAMENTE de un snapshot real recibido del store. */
+interface HistorySample {
+  t: number
+  activeAgents: number
+  runsActive: number
+  approvalsPending: number
+  blockedTasks: number
+  runtimesRunning: number
+  meetingsActive: number
+}
+
+const HISTORY_MAX = 60
+
+function sampleFrom(snapshot: EecSnapshot): HistorySample {
+  const h = snapshot.health
+  const ts = new Date(snapshot.generatedAt).getTime()
+  return {
+    t: Number.isFinite(ts) ? ts : Date.now(),
+    activeAgents: (h.agentsByState.IDLE ?? 0) + (h.agentsByState.WORKING ?? 0),
+    runsActive: h.runsActive,
+    approvalsPending: h.approvalsPending,
+    blockedTasks: h.blockedTasks,
+    runtimesRunning: h.runtimesRunning,
+    meetingsActive: h.meetingsActive,
+  }
+}
+
+/**
+ * Buffer circular (máx 60) que observa los snapshots que LLEGAN al store.
+ * La primera muestra se siembra al montar (lo que ya llegó) y cada snapshot
+ * NUEVO se agrega vía suscripción al store (dedupe por generatedAt). Si la
+ * vista se cierra y reabre, el historial se reinicia — por eso las etiquetas
+ * dicen "desde la apertura de la vista".
+ */
+function useSnapshotHistory(snapshot: EecSnapshot | null): HistorySample[] {
+  const [history, setHistory] = useState<HistorySample[]>(() =>
+    snapshot ? [sampleFrom(snapshot)] : [],
+  )
+  const lastGeneratedRef = useRef<string | null>(snapshot?.generatedAt ?? null)
+
+  useEffect(() => {
+    // Suscripción al sistema externo (store zustand): setState SOLO dentro del
+    // callback de suscripción, una muestra por snapshot nuevo que llega.
+    const unsubscribe = useEecStore.subscribe((state, prevState) => {
+      const snap = state.snapshot
+      if (!snap || snap === prevState.snapshot) return
+      if (lastGeneratedRef.current === snap.generatedAt) return
+      lastGeneratedRef.current = snap.generatedAt
+      const sample = sampleFrom(snap)
+      setHistory((prev) => {
+        const next = [...prev, sample]
+        return next.length > HISTORY_MAX ? next.slice(next.length - HISTORY_MAX) : next
+      })
+    })
+    return unsubscribe
+  }, [])
+
+  return history
+}
+
+// ---------- Sparkline (área mini, sin ejes, tendencia real) ----------
+
+function Sparkline({
+  data,
+  color,
+  seriesLabel,
+}: {
+  data: Array<{ t: number; v: number }>
+  color: string
+  seriesLabel: string
+}) {
+  if (data.length < 2) {
+    return (
+      <div className="flex h-8 items-center justify-center rounded bg-slate-800/40 text-[9px] uppercase tracking-wider text-slate-600">
+        acumulando…
+      </div>
+    )
+  }
+  return (
+    <div
+      className="h-8 w-full"
+      role="img"
+      aria-label={`Tendencia de ${seriesLabel} sobre ${data.length} muestras reales`}
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 3, right: 2, bottom: 0, left: 2 }}>
+          <XAxis dataKey="t" hide />
+          <YAxis hide domain={[0, 'dataMax + 1']} />
+          <Tooltip
+            cursor={{ stroke: 'rgba(148,163,184,0.4)', strokeWidth: 1 }}
+            contentStyle={{
+              backgroundColor: '#0f172a',
+              border: '1px solid #334155',
+              borderRadius: 6,
+              fontSize: 11,
+              padding: '4px 8px',
+            }}
+            labelFormatter={(label) =>
+              new Date(Number(label)).toLocaleTimeString('es-CO', { hour12: false })
+            }
+            formatter={(value) => [String(value), seriesLabel]}
+          />
+          <Area
+            type="monotone"
+            dataKey="v"
+            name={seriesLabel}
+            stroke={color}
+            fill={color}
+            fillOpacity={0.18}
+            strokeWidth={1.5}
+            dot={false}
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+// ---------- Desgloses reales para KPIs (title / aria-describedby) ----------
+
+const AGENT_STATE_ORDER: readonly string[] = [
+  'WORKING', 'IDLE', 'WAITING', 'IN_MEETING', 'REVIEW', 'PAUSED',
+  'RECOVERY', 'BLOCKED', 'ERROR', 'SUSPENDED', 'OFFLINE',
+]
+
+function agentsDetail(byState: Record<string, number>): string {
+  const entries: Array<[string, number]> = []
+  for (const st of AGENT_STATE_ORDER) {
+    const n = byState[st] ?? 0
+    if (n > 0) entries.push([st, n])
+  }
+  for (const [st, n] of Object.entries(byState)) {
+    if (n > 0 && !AGENT_STATE_ORDER.includes(st)) entries.push([st, n])
+  }
+  return entries.length
+    ? `Desglose real: ${entries.map(([st, n]) => `${n} ${st}`).join(' · ')}`
+    : 'Desglose real: sin agentes por estado'
+}
+
+function runsDetail(runs: EecRun[]): string {
+  let running = 0
+  let waiting = 0
+  for (const r of runs) {
+    if (r.status === 'RUNNING') running += 1
+    else if (r.status === 'WAITING_APPROVAL') waiting += 1
+  }
+  return `Desglose real: ${running} RUNNING · ${waiting} WAITING_APPROVAL`
+}
+
+const RISK_ORDER: readonly string[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
+
+function approvalsDetail(list: EecApproval[]): string {
+  const pending = list.filter((a) => a.status === 'REQUESTED')
+  if (pending.length === 0) return 'Desglose real: nada pendiente de decisión humana'
+  const byRisk = new Map<string, number>()
+  for (const a of pending) byRisk.set(a.risk, (byRisk.get(a.risk) ?? 0) + 1)
+  const parts: string[] = []
+  for (const r of RISK_ORDER) {
+    const n = byRisk.get(r) ?? 0
+    if (n > 0) parts.push(`${n} ${r}`)
+  }
+  for (const [r, n] of byRisk) {
+    if (!RISK_ORDER.includes(r) && n > 0) parts.push(`${n} ${r}`)
+  }
+  return `Desglose real: ${parts.join(' · ')} (REQUESTED)`
+}
+
+const MEETING_ORDER: readonly string[] = ['IN_PROGRESS', 'INVITED', 'SCHEDULED']
+
+function meetingsDetail(list: EecSnapshot['meetings']): string {
+  const parts: string[] = []
+  for (const st of MEETING_ORDER) {
+    const n = list.filter((m) => m.status === st).length
+    if (n > 0) parts.push(`${n} ${st}`)
+  }
+  return parts.length ? `Desglose real: ${parts.join(' · ')}` : 'Desglose real: sin reuniones activas'
+}
+
+function blockedDetail(list: EecTask[]): string {
+  let blocked = 0
+  let failed = 0
+  for (const t of list) {
+    if (t.status === 'BLOCKED') blocked += 1
+    else if (t.status === 'FAILED') failed += 1
+  }
+  return `Desglose real: ${blocked} BLOCKED · ${failed} FAILED`
+}
+
+const RUNTIME_ORDER: readonly string[] = [
+  'RUNNING', 'IDLE', 'STARTING', 'RECOVERING', 'STOPPING', 'ERROR', 'CRASHED', 'UNHEALTHY',
+]
+
+function runtimesDetail(agents: EecAgent[]): string {
+  const byStatus = new Map<string, number>()
+  for (const a of agents) {
+    for (const rt of a.runtimes) byStatus.set(rt.status, (byStatus.get(rt.status) ?? 0) + 1)
+  }
+  const parts: string[] = []
+  for (const st of RUNTIME_ORDER) {
+    const n = byStatus.get(st) ?? 0
+    if (n > 0) parts.push(`${n} ${st}`)
+  }
+  for (const [st, n] of byStatus) {
+    if (!RUNTIME_ORDER.includes(st) && n > 0) parts.push(`${n} ${st}`)
+  }
+  return parts.length ? `Desglose real: ${parts.join(' · ')}` : 'Desglose real: sin runtimes registrados'
+}
+
+// ---------- Ritmo de eventos (reales del store, agrupados por minuto) ----------
+
+const PACE_WINDOW_MS = 10 * 60 * 1000
+
+/** Paleta del proyecto por namespace — sin azul/índigo. */
+const PACE_OTHER_COLOR = '#64748b'
+const NS_CHART_COLOR: Record<string, string> = {
+  agent: '#34d399', // emerald-400
+  run: '#6ee7b7', // emerald-300
+  task: '#2dd4bf', // teal-400
+  client: '#5eead4', // teal-300
+  tool: '#99f6e4', // teal-200
+  workflow: '#a78bfa', // violet-400
+  memory: '#c4b5fd', // violet-300
+  knowledge: '#c4b5fd', // violet-300
+  runtime: '#fbbf24', // amber-400
+  approval: '#fb923c', // orange-400
+  meeting: '#e879f9', // fuchsia-400
+  system: '#94a3b8', // slate-400
+}
+
+const NS_PACE_ORDER: readonly string[] = [
+  'agent', 'run', 'task', 'workflow', 'runtime', 'approval', 'meeting', 'system',
+  'client', 'tool', 'memory', 'knowledge', 'otros',
+]
+
+interface PaceRow {
+  label: string
+  [ns: string]: string | number
+}
+
+interface PaceData {
+  rows: PaceRow[]
+  series: string[]
+  count: number
+  windowLabel: string
+}
+
+function nsKey(eventType: string): string {
+  return eventType.split('.')[0] ?? 'otros'
+}
+
+const minuteFloor = (ms: number): number => Math.floor(ms / 60000) * 60000
+
+const hhmm = (ms: number): string =>
+  new Date(ms).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', hour12: false })
+
+/** Agrupa los eventos reales del store por minuto (ventana 10 min) para el gráfico apilado. */
+function buildPaceData(events: EecEventItem[]): PaceData {
+  const now = Date.now()
+  const windowStart = now - PACE_WINDOW_MS
+
+  const inWindow = events.filter((e) => {
+    const ts = new Date(e.timestamp).getTime()
+    return Number.isFinite(ts) && ts >= windowStart
+  })
+
+  if (inWindow.length === 0) {
+    return { rows: [], series: [], count: 0, windowLabel: 'últimos 10 min' }
+  }
+
+  const oldestInWindow = Math.min(...inWindow.map((e) => new Date(e.timestamp).getTime()))
+  const firstBucket = minuteFloor(Math.max(windowStart, oldestInWindow))
+  const lastBucket = minuteFloor(now)
+
+  const counts = new Map<number, Map<string, number>>()
+  for (let b = firstBucket; b <= lastBucket; b += 60000) counts.set(b, new Map())
+  for (const e of inWindow) {
+    const bucket = counts.get(minuteFloor(new Date(e.timestamp).getTime()))
+    if (!bucket) continue
+    const ns = nsKey(e.event_type)
+    bucket.set(ns, (bucket.get(ns) ?? 0) + 1)
+  }
+
+  const totals = new Map<string, number>()
+  for (const bucket of counts.values()) {
+    for (const [ns, n] of bucket) totals.set(ns, (totals.get(ns) ?? 0) + n)
+  }
+
+  const known = [...NS_PACE_ORDER].filter((ns) => ns !== 'otros' && (totals.get(ns) ?? 0) > 0)
+  const unknownTotal = [...totals.entries()]
+    .filter(([ns]) => !NS_PACE_ORDER.includes(ns))
+    .reduce((acc, [, n]) => acc + n, 0)
+  const series = unknownTotal > 0 ? [...known, 'otros'] : known
+
+  const rows: PaceRow[] = []
+  for (let b = firstBucket; b <= lastBucket; b += 60000) {
+    const bucket = counts.get(b) ?? new Map<string, number>()
+    const row: PaceRow = { label: hhmm(b) }
+    for (const ns of series) {
+      if (ns === 'otros') {
+        let sum = 0
+        for (const [k, n] of bucket) if (!NS_PACE_ORDER.includes(k)) sum += n
+        row[ns] = sum
+      } else {
+        row[ns] = bucket.get(ns) ?? 0
+      }
+    }
+    rows.push(row)
+  }
+
+  // Etiqueta honesta: si el buffer local empezó dentro de la ventana, se declara.
+  const oldestBuffer = events.length
+    ? Math.min(...events.map((e) => new Date(e.timestamp).getTime()).filter(Number.isFinite))
+    : null
+  const bufferCoversWindow = oldestBuffer != null && Number.isFinite(oldestBuffer) && oldestBuffer <= windowStart
+  const windowLabel = bufferCoversWindow
+    ? 'últimos 10 min'
+    : `desde ${hhmm(firstBucket)} (inicio del buffer local)`
+
+  return { rows, series, count: inWindow.length, windowLabel }
+}
+
+function paceColor(ns: string): string {
+  return NS_CHART_COLOR[ns] ?? PACE_OTHER_COLOR
+}
+
+function EventPacePanel() {
+  const events = useEecStore((s) => s.events)
+  const pace = useMemo(() => buildPaceData(events), [events])
+
+  return (
+    <Card className="gap-3 rounded-lg border-slate-800/80 bg-slate-900/60">
+      <CardHeader className="pb-0">
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <BarChart3 className="h-4 w-4 text-violet-300" aria-hidden />
+          Ritmo de eventos
+        </CardTitle>
+        <CardDescription className="text-xs text-slate-500">
+          Eventos reales del buffer del store, agrupados por minuto · ventana: {pace.windowLabel} ·{' '}
+          {pace.count} eventos
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {pace.rows.length === 0 ? (
+          <div className="flex h-40 items-center justify-center rounded-md border border-dashed border-slate-800 px-4 text-center text-xs text-slate-500">
+            Sin eventos reales en los últimos 10 min — el ritmo aparecerá en cuanto el bus emita.
+          </div>
+        ) : (
+          <div className="h-44 w-full" role="img" aria-label={`Ritmo de eventos: ${pace.count} eventos en ${pace.rows.length} minutos`}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={pace.rows} margin={{ top: 6, right: 6, bottom: 0, left: -14 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.14)" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={{ stroke: '#334155' }}
+                  tickLine={false}
+                  minTickGap={26}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={38}
+                />
+                <Tooltip
+                  cursor={{ fill: 'rgba(148,163,184,0.08)' }}
+                  contentStyle={{
+                    backgroundColor: '#0f172a',
+                    border: '1px solid #334155',
+                    borderRadius: 8,
+                    fontSize: 11,
+                  }}
+                  labelStyle={{ color: '#e2e8f0', marginBottom: 4 }}
+                  itemStyle={{ padding: 0 }}
+                />
+                {pace.series.map((ns) => (
+                  <Bar key={ns} dataKey={ns} stackId="ritmo" fill={paceColor(ns)} isAnimationActive={false} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        {pace.series.length > 0 && (
+          <div className="flex flex-wrap gap-x-3 gap-y-1" aria-label="Series del ritmo de eventos">
+            {pace.series.map((ns) => (
+              <span key={ns} className="flex items-center gap-1 font-mono text-[10px] text-slate-400">
+                <span className="h-2 w-2 rounded-[2px]" style={{ backgroundColor: paceColor(ns) }} aria-hidden />
+                {ns}
+              </span>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ---------- KPI ----------
 
 function Kpi({
@@ -102,12 +523,20 @@ function Kpi({
   value,
   sub,
   tone = 'neutral',
+  detail,
+  descId,
+  spark,
+  sparkNote,
 }: {
   icon: LucideIcon
   label: string
   value: number | string
   sub?: string
   tone?: 'neutral' | 'amber' | 'rose' | 'emerald'
+  detail?: string
+  descId?: string
+  spark?: { data: Array<{ t: number; v: number }>; color: string; seriesLabel: string }
+  sparkNote?: string
 }) {
   const valueTone =
     tone === 'rose'
@@ -127,7 +556,16 @@ function Kpi({
           : 'text-slate-500'
 
   return (
-    <Card className="gap-2 rounded-lg border-slate-800/80 bg-slate-900/60 p-4">
+    <Card
+      className="gap-2 rounded-lg border-slate-800/80 bg-slate-900/60 p-4"
+      title={detail ?? label}
+      aria-describedby={descId}
+    >
+      {detail && descId && (
+        <span id={descId} className="sr-only">
+          {detail}
+        </span>
+      )}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-wider text-slate-500">{label}</p>
@@ -138,11 +576,71 @@ function Kpi({
         </div>
         <Icon className={cn('h-5 w-5 shrink-0', iconTone)} aria-hidden />
       </div>
+      {spark && (
+        <div className="mt-1 space-y-0.5">
+          <Sparkline data={spark.data} color={spark.color} seriesLabel={spark.seriesLabel} />
+          {sparkNote && (
+            <p className="truncate text-[10px] text-slate-600" title={sparkNote}>
+              {sparkNote}
+            </p>
+          )}
+        </div>
+      )}
     </Card>
   )
 }
 
 // ---------- Paneles ----------
+
+const AgentRow = memo(function AgentRow({
+  agent,
+  onSelect,
+}: {
+  agent: EecAgent
+  onSelect: (id: string) => void
+}) {
+  const st = AGENT_STATE_STYLE[agent.state]
+  const rt: EecRuntime | undefined = agent.runtimes[0]
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(agent.id)}
+      className={cn(
+        'flex min-h-11 w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors',
+        'hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50',
+      )}
+      aria-label={`Inspeccionar agente ${agent.code}`}
+    >
+      <span
+        className={cn('h-2.5 w-2.5 shrink-0 rounded-full', st?.dot ?? 'bg-slate-600')}
+        aria-hidden
+      />
+      <span className="w-14 shrink-0 font-mono text-xs text-slate-400">{agent.code}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm text-slate-200">
+          {agent.name}
+          <span className="text-slate-500"> · {agent.role}</span>
+        </span>
+        <span className="block truncate text-xs text-slate-500">
+          {agent.activity ?? (agent.state === 'OFFLINE' ? 'sin conexión' : 'sin actividad reportada')}
+        </span>
+      </span>
+      <Badge
+        variant="outline"
+        className={cn(
+          'shrink-0 border font-mono text-[10px]',
+          st?.chip ?? 'border-slate-600/40 bg-slate-600/20 text-slate-400',
+        )}
+      >
+        {st?.label ?? agent.state}
+      </Badge>
+      <span className="hidden shrink-0 items-center gap-1 font-mono text-[10px] text-slate-500 sm:flex">
+        <span className={cn('h-1.5 w-1.5 rounded-full', runtimeDot(rt?.status))} aria-hidden />
+        {rt ? rt.status : 'SIN RT'}
+      </span>
+    </button>
+  )
+})
 
 function AgentsPanel() {
   const snapshot = useEecStore((s) => s.snapshot)
@@ -161,47 +659,9 @@ function AgentsPanel() {
         {agents.length === 0 && (
           <p className="px-2 py-4 text-xs text-slate-500">Sin agentes registrados.</p>
         )}
-        {agents.map((a) => {
-          const st = AGENT_STATE_STYLE[a.state]
-          const rt: EecRuntime | undefined = a.runtimes[0]
-          return (
-            <button
-              key={a.id}
-              type="button"
-              onClick={() => selectAgent(a.id)}
-              className={cn(
-                'flex min-h-11 w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors',
-                'hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50',
-              )}
-              aria-label={`Inspeccionar agente ${a.code}`}
-            >
-              <span
-                className={cn('h-2.5 w-2.5 shrink-0 rounded-full', st?.dot ?? 'bg-slate-600')}
-                aria-hidden
-              />
-              <span className="w-14 shrink-0 font-mono text-xs text-slate-400">{a.code}</span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm text-slate-200">
-                  {a.name}
-                  <span className="text-slate-500"> · {a.role}</span>
-                </span>
-                <span className="block truncate text-xs text-slate-500">
-                  {a.activity ?? (a.state === 'OFFLINE' ? 'sin conexión' : 'sin actividad reportada')}
-                </span>
-              </span>
-              <Badge
-                variant="outline"
-                className={cn('shrink-0 border font-mono text-[10px]', st?.chip ?? 'border-slate-600/40 bg-slate-600/20 text-slate-400')}
-              >
-                {st?.label ?? a.state}
-              </Badge>
-              <span className="hidden shrink-0 items-center gap-1 font-mono text-[10px] text-slate-500 sm:flex">
-                <span className={cn('h-1.5 w-1.5 rounded-full', runtimeDot(rt?.status))} aria-hidden />
-                {rt ? rt.status : 'SIN RT'}
-              </span>
-            </button>
-          )
-        })}
+        {agents.map((a) => (
+          <AgentRow key={a.id} agent={a} onSelect={selectAgent} />
+        ))}
       </CardContent>
     </Card>
   )
@@ -276,7 +736,7 @@ function ActiveRunsPanel() {
   )
 }
 
-function EventRow({ event }: { event: EecEventItem }) {
+const EventRow = memo(function EventRow({ event }: { event: EecEventItem }) {
   return (
     <div className="flex items-center gap-2 px-1 py-1 text-[11px]">
       <span className="shrink-0 font-mono text-slate-600">{shortClock(event.timestamp)}</span>
@@ -296,14 +756,14 @@ function EventRow({ event }: { event: EecEventItem }) {
       </span>
     </div>
   )
-}
+})
 
 function EventsPanel() {
   const events = useEecStore((s) => s.events)
   const feed = useMemo(() => events.slice(0, 40), [events])
 
   return (
-    <Card className="gap-3 rounded-lg border-slate-800/80 bg-slate-900/60">
+    <Card className="gap-3 rounded-lg border-slate-800/80 bg-slate-900/60 lg:col-span-2 xl:col-span-1">
       <CardHeader className="pb-0">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" aria-hidden />
@@ -427,11 +887,11 @@ function CentralSkeleton() {
       <Skeleton className="h-7 w-64 bg-slate-800" />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} className="h-24 bg-slate-800" />
+          <Skeleton key={i} className="h-28 bg-slate-800" />
         ))}
       </div>
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 4 }).map((_, i) => (
+        {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} className="h-72 bg-slate-800" />
         ))}
       </div>
@@ -443,13 +903,45 @@ function CentralSkeleton() {
 
 export default function CentralScreen() {
   const snapshot = useEecStore((s) => s.snapshot)
+  const history = useSnapshotHistory(snapshot)
 
   const health = snapshot?.health
   const activeAgents = health
     ? (health.agentsByState.IDLE ?? 0) + (health.agentsByState.WORKING ?? 0)
     : 0
 
-  if (!snapshot || !health) return <CentralSkeleton />
+  // Series de tendencia derivadas del historial real observado.
+  const sparks = useMemo(
+    () => ({
+      agents: history.map((s) => ({ t: s.t, v: s.activeAgents })),
+      runs: history.map((s) => ({ t: s.t, v: s.runsActive })),
+      approvals: history.map((s) => ({ t: s.t, v: s.approvalsPending })),
+      blocked: history.map((s) => ({ t: s.t, v: s.blockedTasks })),
+    }),
+    [history],
+  )
+
+  // Etiqueta honesta: la ventana es la que lleve la vista abierta (buffer en memoria).
+  const sparkNote = useMemo(() => {
+    if (history.length < 2) return 'acumulando muestras reales…'
+    const spanMin = Math.max(1, Math.round((history[history.length - 1].t - history[0].t) / 60000))
+    return `tendencia real · ~${spanMin} min (desde la apertura de la vista)`
+  }, [history])
+
+  // Desgloses reales para los atributos de accesibilidad de cada KPI.
+  const details = useMemo(() => {
+    if (!snapshot || !health) return null
+    return {
+      agents: agentsDetail(health.agentsByState),
+      runs: runsDetail(snapshot.runs),
+      approvals: approvalsDetail(snapshot.approvals),
+      meetings: meetingsDetail(snapshot.meetings),
+      blocked: blockedDetail(snapshot.tasks),
+      runtimes: runtimesDetail(snapshot.agents),
+    }
+  }, [snapshot, health])
+
+  if (!snapshot || !health || !details) return <CentralSkeleton />
 
   return (
     <div className="space-y-4">
@@ -460,7 +952,7 @@ export default function CentralScreen() {
         </span>
       </div>
 
-      {/* Fila de KPIs */}
+      {/* Fila de KPIs con tendencias reales */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Kpi
           icon={Bot}
@@ -468,22 +960,54 @@ export default function CentralScreen() {
           value={activeAgents}
           sub={`de ${health.agentsTotal} totales`}
           tone="emerald"
+          detail={details.agents}
+          descId="kpi-desc-agentes"
+          spark={{ data: sparks.agents, color: '#2dd4bf', seriesLabel: 'agentes activos' }}
+          sparkNote={sparkNote}
         />
-        <Kpi icon={Activity} label="Runs activos" value={health.runsActive} />
+        <Kpi
+          icon={Activity}
+          label="Runs activos"
+          value={health.runsActive}
+          detail={details.runs}
+          descId="kpi-desc-runs"
+          spark={{ data: sparks.runs, color: '#34d399', seriesLabel: 'runs activos' }}
+          sparkNote={sparkNote}
+        />
         <Kpi
           icon={Stamp}
           label="Aprobaciones pendientes"
           value={health.approvalsPending}
           tone={health.approvalsPending > 0 ? 'amber' : 'neutral'}
+          detail={details.approvals}
+          descId="kpi-desc-aprobaciones"
+          spark={{ data: sparks.approvals, color: '#fbbf24', seriesLabel: 'aprobaciones pendientes' }}
+          sparkNote={sparkNote}
         />
-        <Kpi icon={Users} label="Reuniones activas" value={health.meetingsActive} />
+        <Kpi
+          icon={Users}
+          label="Reuniones activas"
+          value={health.meetingsActive}
+          detail={details.meetings}
+          descId="kpi-desc-reuniones"
+        />
         <Kpi
           icon={ShieldAlert}
           label="Tareas bloqueadas"
           value={health.blockedTasks}
           tone={health.blockedTasks > 0 ? 'rose' : 'neutral'}
+          detail={details.blocked}
+          descId="kpi-desc-bloqueadas"
+          spark={{ data: sparks.blocked, color: '#f43f5e', seriesLabel: 'tareas bloqueadas' }}
+          sparkNote={sparkNote}
         />
-        <Kpi icon={Server} label="Runtimes corriendo" value={health.runtimesRunning} />
+        <Kpi
+          icon={Server}
+          label="Runtimes corriendo"
+          value={health.runtimesRunning}
+          detail={details.runtimes}
+          descId="kpi-desc-runtimes"
+        />
       </div>
 
       {/* Paneles operacionales */}
@@ -491,7 +1015,10 @@ export default function CentralScreen() {
         <AgentsPanel />
         <ActiveRunsPanel />
         <EventsPanel />
-        <div className="lg:col-span-2 xl:col-span-3">
+        <div className="lg:col-span-2 xl:col-span-2">
+          <EventPacePanel />
+        </div>
+        <div className="lg:col-span-2 xl:col-span-1">
           <AttentionPanel />
         </div>
       </div>

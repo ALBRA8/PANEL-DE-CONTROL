@@ -13,6 +13,10 @@ import { useEecStore } from '@/store/eec-store'
 import { AGENT_STATE_STYLE, timeAgo, type EecAgent } from '@/lib/eec-client'
 import { cn } from '@/lib/utils'
 
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -232,6 +236,8 @@ function initialsOf(name: string): string {
 function AgentActions({ agent }: { agent: EecAgent }) {
   const command = useEecStore((s) => s.command)
   const [busy, setBusy] = useState<string | null>(null)
+  // confirmación destructiva: solo agent.suspend y agent.pause con run en curso (WORKING)
+  const [confirmCmd, setConfirmCmd] = useState<'agent.suspend' | 'agent.pause' | null>(null)
 
   const exec = useCallback(
     async (type: string, label: string) => {
@@ -255,7 +261,8 @@ function AgentActions({ agent }: { agent: EecAgent }) {
   const btn =
     'h-11 px-3 text-xs border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800 hover:text-slate-100'
 
-  switch (agent.state) {
+  const controls = (() => {
+    switch (agent.state) {
     case 'OFFLINE':
       return (
         <Button
@@ -282,7 +289,7 @@ function AgentActions({ agent }: { agent: EecAgent }) {
             variant="outline"
             className={btn}
             disabled={busy !== null}
-            onClick={() => void exec('agent.suspend', 'Suspender agente')}
+            onClick={() => setConfirmCmd('agent.suspend')}
           >
             {busy === 'agent.suspend' ? '…' : 'Suspender'}
           </Button>
@@ -316,7 +323,7 @@ function AgentActions({ agent }: { agent: EecAgent }) {
           variant="outline"
           className={btn}
           disabled={busy !== null}
-          onClick={() => void exec('agent.pause', 'Pausar agente')}
+          onClick={() => setConfirmCmd('agent.pause')}
         >
           {busy === 'agent.pause' ? '…' : 'Pausar'}
         </Button>
@@ -324,7 +331,49 @@ function AgentActions({ agent }: { agent: EecAgent }) {
     default:
       // WAITING / BLOCKED / IN_MEETING / ERROR / RECOVERY: sin comandos definidos — honesto
       return null
-  }
+    }
+  })()
+
+  return (
+    <>
+      {controls}
+      <AlertDialog open={confirmCmd !== null} onOpenChange={(open) => { if (!open) setConfirmCmd(null) }}>
+        <AlertDialogContent className="border-slate-800 bg-slate-950">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-slate-100">
+              {confirmCmd === 'agent.suspend' ? `Suspender ${agent.code}` : `Pausar ${agent.code}`}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              {confirmCmd === 'agent.suspend'
+                ? 'El agente quedará SUSPENDED: no aceptará nuevas tareas ni continuará la actual.'
+                : 'Se pausará el run en curso; el progreso se conservará.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter aria-label="Confirmar o cancelar la acción sobre el agente">
+            <AlertDialogCancel className="h-11 border-slate-700 bg-transparent text-slate-200 hover:bg-slate-800 hover:text-slate-100">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(
+                'h-11',
+                confirmCmd === 'agent.suspend'
+                  ? 'bg-rose-600 text-white hover:bg-rose-500'
+                  : 'bg-amber-400 text-amber-950 hover:bg-amber-300',
+              )}
+              onClick={() => {
+                const cmd = confirmCmd
+                setConfirmCmd(null)
+                if (cmd === 'agent.suspend') void exec('agent.suspend', 'Suspender agente')
+                else if (cmd === 'agent.pause') void exec('agent.pause', 'Pausar agente')
+              }}
+            >
+              {confirmCmd === 'agent.suspend' ? 'Suspender' : 'Pausar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  )
 }
 
 // ---------- Tarjeta de agente ----------
