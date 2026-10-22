@@ -194,12 +194,20 @@ export async function dispatchCommand(
   payload: Record<string, unknown> = {},
   idempotencyKey?: string,
 ): Promise<CommandResult> {
+  // EEC V2 §6: la identidad la deriva el SERVIDOR de la sesión/token.
+  // El cliente NO declara requesterType/requesterId (se ignoran en el API).
   const res = await fetch('/api/eec/commands', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, payload, requesterType: 'HUMAN', requesterId: 'operator', idempotencyKey }),
+    body: JSON.stringify({ type, payload, idempotencyKey }),
     cache: 'no-store',
   })
+  if (res.status === 401 || res.status === 503) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eec:auth-required', { detail: { status: res.status } }))
+    }
+    return { commandId: '', status: 'UNAUTHENTICATED', ok: false, error: 'auth_required' } as CommandResult
+  }
   return res.json()
 }
 

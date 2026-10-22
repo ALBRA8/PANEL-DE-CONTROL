@@ -76,9 +76,26 @@ export type SessionStatus = (typeof SESSION_STATES)[number]
 // ---------- RUN (spec §10) ----------
 export const RUN_STATES = [
   'PENDING', 'RUNNING', 'WAITING_APPROVAL', 'SUCCEEDED', 'FAILED',
-  'CANCELLED', 'TIMED_OUT',
+  'CANCELLED', 'TIMED_OUT', 'UNRECONCILED',
 ] as const
 export type RunStatus = (typeof RUN_STATES)[number]
+
+/** Transiciones de RUN. UNRECONCILED: resultado indeterminado tras reinicio (§5) — solo un humano o nueva evidencia lo resuelve. */
+export const RUN_TRANSITIONS: Record<RunStatus, RunStatus[]> = {
+  PENDING: ['RUNNING', 'WAITING_APPROVAL', 'CANCELLED', 'FAILED'],
+  RUNNING: ['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'UNRECONCILED'],
+  WAITING_APPROVAL: ['RUNNING', 'CANCELLED', 'FAILED'],
+  SUCCEEDED: [],
+  FAILED: ['PENDING'],
+  CANCELLED: [],
+  TIMED_OUT: ['PENDING'],
+  UNRECONCILED: ['FAILED', 'SUCCEEDED'],
+}
+
+export function canRunTransition(from: string, to: string): boolean {
+  const valid = RUN_TRANSITIONS[from as RunStatus]
+  return !!valid && valid.includes(to as RunStatus)
+}
 
 // ---------- TASK (spec §11) ----------
 export const TASK_STATES = [
@@ -135,7 +152,7 @@ export type MemoryScope = (typeof MEMORY_SCOPES)[number]
 // ---------- PROVIDER TYPES (spec §43) ----------
 export const PROVIDER_TYPES = [
   'AGENT', 'ORCHESTRATOR', 'RUNTIME', 'MODEL', 'TOOL',
-  'MEMORY', 'KNOWLEDGE', 'NOTIFICATION', 'STORAGE',
+  'MEMORY', 'KNOWLEDGE', 'NOTIFICATION', 'STORAGE', 'LIFECYCLE',
 ] as const
 export type ProviderType = (typeof PROVIDER_TYPES)[number]
 

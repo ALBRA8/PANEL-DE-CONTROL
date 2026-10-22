@@ -33,6 +33,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
+import { OperatorLogin } from './operator-login'
 
 import { useEecStore, useEecBootstrap, type EecView } from '@/store/eec-store'
 import { SEVERITY_STYLE, timeAgo, type EecRun } from '@/lib/eec-client'
@@ -681,6 +682,10 @@ export default function EecShell() {
             <Separator orientation="vertical" className="hidden h-6 bg-slate-800 sm:block" />
 
             <ThemeToggle />
+
+            <Separator orientation="vertical" className="hidden h-6 bg-slate-800 sm:block" />
+
+            <OperatorLogin />
 
             <Separator orientation="vertical" className="hidden h-6 bg-slate-800 sm:block" />
 

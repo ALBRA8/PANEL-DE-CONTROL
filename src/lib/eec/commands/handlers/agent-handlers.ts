@@ -12,15 +12,48 @@ import { providerRegistry, RuntimeInterface } from '../../domain/contracts'
 import { canRuntimeTransition } from '../../domain/types'
 
 export function registerAgentHandlers(): void {
-  // ---------------- agent.register (§16) ----------------
+  // ---------------- agent.register (§16 + EEC V2 §3) ----------------
   registerCommandHandler('agent.register', async ({ payload, sim }) => {
     const p = payload as {
       code: string; name: string; role: string; description?: string
       provider: string; endpoint?: string; departmentCode?: string; officeCode?: string
       capabilities: string[]; skills: string[]; clearance: string
+      manifest?: unknown
     }
     const exists = await db.agent.findUnique({ where: { code: p.code } })
     if (exists) return { agentId: exists.id, note: 'already_registered' }
+
+    // ---- EEC V2 §3: manifiesto del contrato común — validado ANTES de registrar ----
+    let manifestValidated: Record<string, unknown> | null = null
+    let manifestError: string | null = null
+    if (p.manifest !== undefined) {
+      const { validateManifest } = await import('../../contracts/agent-manifest')
+      const v = validateManifest(p.manifest)
+      if (!v.ok) {
+        manifestError = v.errors.join('; ')
+      } else if (v.manifest.identity.code !== p.code) {
+        manifestError = `manifest_identity_mismatch: manifiesto declara ${v.manifest.identity.code}, registro usa ${p.code}`
+      } else {
+        manifestValidated = v.manifest as unknown as Record<string, unknown>
+      }
+    }
+    if (manifestError) {
+      await writeAudit({
+        actorId: 'eec:agents', actorType: 'SYSTEM', action: 'agent.register.rejected_manifest',
+        entityType: 'AGENT', entityId: p.code, input: { code: p.code, provider: p.provider },
+        result: 'REJECTED', why: manifestError,
+      })
+      throw new Error(`manifest_invalid:${manifestError}`)
+    }
+    // provider real sin manifiesto → rechazo honesto (no hay contrato que ejecutar)
+    if (!manifestValidated && ['local-process', 'http-agent'].includes(p.provider)) {
+      throw new Error(`manifest_required: el provider ${p.provider} exige un manifiesto del contrato de agentes v1`)
+    }
+
+    const manifestCaps = manifestValidated
+      ? ((manifestValidated.capabilities ?? []) as Array<{ op?: string }>).map(c => String(c.op ?? '')).filter(Boolean)
+      : []
+    const capabilities = Array.from(new Set([...p.capabilities, ...manifestCaps]))
 
     const department = p.departmentCode ? await db.department.findUnique({ where: { code: p.departmentCode } }) : null
     const office = p.officeCode ? await db.location.findUnique({ where: { code: p.officeCode } }) : null
@@ -29,9 +62,10 @@ export function registerAgentHandlers(): void {
       data: {
         code: p.code, name: p.name, role: p.role, description: p.description,
         provider: p.provider, endpoint: p.endpoint,
-        capabilitiesJson: JSON.stringify(p.capabilities),
+        capabilitiesJson: JSON.stringify(capabilities),
         skillsJson: JSON.stringify(p.skills),
         registrationJson: JSON.stringify({ clearance: p.clearance, registeredVia: 'command' }),
+        providerConfigJson: manifestValidated ? JSON.stringify({ manifest: manifestValidated }) : '{}',
         departmentId: department?.id, officeId: office?.id,
         state: 'OFFLINE', healthStatus: 'UNKNOWN',
       },
@@ -78,6 +112,30 @@ export function registerAgentHandlers(): void {
         event_type: 'runtime.state.changed', source: 'eec.runtimes', subject: `runtime:${runtime.id}`,
         payload: { runtimeId: runtime.id, agentId: agent.id, status: next }, sim,
       })
+    }
+
+    // ---- EEC V2 §4: health check REAL para providers reales (nunca confiar en
+    // "está en la BD" como prueba de operativo). Un fallo de salud deja al agente
+    // OFFLINE/UNHEALTHY y el comando falla con evidencia — no se simula conexión. ----
+    if (['local-process', 'http-agent'].includes(agent.provider)) {
+      const { providerRegistry } = await import('../../domain/contracts')
+      try {
+        const adapter = providerRegistry.get<{ health(agentId: string): Promise<{ healthy: boolean; detail?: string }> }>('AGENT', agent.provider)
+        const hp = await adapter.health(agent.id)
+        if (!hp.healthy) {
+          await db.agentRuntime.update({ where: { id: runtime.id }, data: { status: 'UNHEALTHY', health: 'UNHEALTHY' } }).catch(() => undefined)
+          await db.agent.update({ where: { id: agent.id }, data: { healthStatus: 'UNHEALTHY', state: 'OFFLINE' } }).catch(() => undefined)
+          await eventBus.publish({
+            event_type: 'agent.health.failed', source: 'eec.agents', subject: `agent:${agent.id}`,
+            payload: { agentId: agent.id, provider: agent.provider, detail: hp.detail }, sim,
+          })
+          throw new Error(`health_check_failed:${agent.provider}:${hp.detail ?? 'sin detalle'}`)
+        }
+        await db.agent.update({ where: { id: agent.id }, data: { healthStatus: 'HEALTHY', lastHeartbeatAt: new Date() } }).catch(() => undefined)
+      } catch (e) {
+        if (e instanceof Error && e.message.startsWith('health_check_failed:')) throw e
+        throw new Error(`health_check_failed:${agent.provider}:error_inesperado:${e instanceof Error ? e.message : 'desconocido'}`)
+      }
     }
 
     const session = await db.session.create({

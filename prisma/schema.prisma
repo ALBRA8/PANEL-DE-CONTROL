@@ -698,3 +698,33 @@ model Notification {
   sim          Boolean   @default(false)
   createdAt    DateTime  @default(now())
 }
+
+// ============================================================
+// EEC V2 — EJECUCIONES REALES (§4, §5): evidencia de procesos.
+// Un registro por proceso real iniciado por el adaptador
+// local-process. Sobrevive a reinicios para reconciliación.
+// ============================================================
+model ExecutionProcess {
+  id               String    @id @default(cuid())
+  runId            String
+  agentId          String?
+  taskId           String?
+  runtimeAdapter   String    @default("local-process")
+  executable       String
+  argsJson         String    @default("[]")
+  workdir          String?
+  pid              Int?
+  // SPAWNED|ALIVE|EXITED|KILLED|TIMEOUT|SPAWN_FAILED|LOST|UNRECONCILED
+  status           String    @default("SPAWNED")
+  exitCode         Int?
+  signal           String?
+  startedAt        DateTime  @default(now())
+  endedAt          DateTime?
+  durationMs       Int?
+  stdoutArtifactId String?
+  stderrArtifactId String?
+  error            String?
+  sim              Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}

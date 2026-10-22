@@ -10,6 +10,8 @@ import { setAgentState, setAgentActivity, setTaskState, TransitionError } from '
 import { writeAudit } from '../../engine/audit'
 import { buildContextPackage } from '../../engine/context'
 import { canTaskTransition, TaskStatus } from '../../domain/types'
+import { cancelRunProcesses } from '../../providers/adapters/local-process'
+import { cancelRemoteExecutions } from '../../providers/adapters/http-agent'
 
 export function registerTaskHandlers(): void {
   registerCommandHandler('task.create', async ({ payload, sim }) => {
@@ -57,7 +59,7 @@ export function registerTaskHandlers(): void {
   })
 
   registerCommandHandler('task.start', async ({ payload, sim }) => {
-    const { taskId } = payload as { taskId: string }
+    const { taskId, input } = payload as { taskId: string; input?: Record<string, unknown> }
     const task = await db.task.findUnique({ where: { id: taskId }, include: { assignee: true } })
     if (!task) throw new Error('TASK_NOT_FOUND')
     if (!task.assignee) throw new Error('TASK_UNASSIGNED')
@@ -70,13 +72,27 @@ export function registerTaskHandlers(): void {
     })
     if (activeRun) return { runId: activeRun.id, taskId: task.id, agentId: agent.id, deduped: true }
 
-    // ---- transición de tarea TODO→IN_PROGRESS ----
+    // ---- transición de tarea TODO→IN_PROGRESS con CLAIM atómico (§5.15) ----
+    // Dos task.start concurrentes: solo uno gana el UPDATE condicional; el otro
+    // se deduplica contra el run vivo existente (nunca dos ejecuciones simultáneas).
     if (!canTaskTransition(task.status, 'IN_PROGRESS')) {
+      throw new TransitionError('TASK', task.id, task.status, 'IN_PROGRESS')
+    }
+    const claimed = await db.task.updateMany({
+      where: { id: task.id, status: 'TODO' },
+      data: { status: 'IN_PROGRESS' },
+    })
+    if (claimed.count === 0) {
+      const live = await db.run.findFirst({ where: { taskId: task.id, status: 'RUNNING' }, orderBy: { createdAt: 'desc' } })
+      if (live) return { runId: live.id, taskId: task.id, agentId: agent.id, deduped: true, note: 'claimed_by_concurrent_start' }
       throw new TransitionError('TASK', task.id, task.status, 'IN_PROGRESS')
     }
 
     // ---- CONTEXT ASSEMBLY (§20) ANTES de ejecutar ----
     const context = await buildContextPackage({ agentId: agent.id, taskId: task.id })
+    // EEC V2: entrada estructurada de la tarea (viaja al agente por STDIN, jamás por shell/argv)
+    const taskInput = input ?? {}
+    ;(context as Record<string, unknown>).taskInput = taskInput
 
     const session = await db.session.findFirst({
       where: { agentId: agent.id, status: 'ACTIVE' }, orderBy: { createdAt: 'desc' },
@@ -149,6 +165,9 @@ export function registerTaskHandlers(): void {
     await setTaskState(task.id, 'CANCELLED', p.reason ?? 'task.cancel', sim)
     const runs = await db.run.findMany({ where: { taskId: task.id, status: { in: ['PENDING', 'RUNNING', 'WAITING_APPROVAL'] } } })
     for (const r of runs) {
+      // EEC V2 (§4): terminar el proceso REAL del run si existe (SIGTERM→SIGKILL)
+      await cancelRunProcesses(r.id, p.reason ?? 'task.cancel').catch(() => undefined)
+      await cancelRemoteExecutions(r.id).catch(() => undefined)
       await db.run.update({ where: { id: r.id }, data: { status: 'CANCELLED', completedAt: new Date(), error: p.reason ?? 'cancelled' } })
       await eventBus.publish({ event_type: 'run.cancelled', source: 'eec.runs', subject: `run:${r.id}`, payload: { runId: r.id, taskId: task.id }, sim })
     }

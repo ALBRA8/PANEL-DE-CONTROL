@@ -1,0 +1,69 @@
+# EEC V2 — 05. Piloto E2E de ejecución real (evidencias)
+
+## Cómo reproducirlo
+
+```bash
+bun run pilot                 # piloto completo en proceso (19 comprobaciones)
+bun run test:v2               # unitarias + integración de proceso real (26 tests)
+bun run test:api-security     # frontera HTTP con servidor vivo (16 comprobaciones)
+bun run test:acceptance       # regresión V1 (31 tests)
+```
+
+El piloto (`scripts/pilot-e2e.ts`) usa el agente de prueba **`agents/echo-agent`**: proceso REAL determinista (bun), separado del proceso web, que no ejecuta órdenes arbitrarias ni depende de servicios externos.
+
+## Ejecución registrada (rama `feature/eec-v2`, 2026-10-23)
+
+```
+✅ 1.  manifiesto validado (contrato v1) — contract 1.0.0
+✅ 1b. versión mayor incompatible rechazada (E_CONTRACT_MAJOR_MISMATCH)
+✅ 2.  agente registrado con contrato (ECO-01)
+✅ 2b. provider real sin manifiesto → rechazado (manifest_required)
+✅ 3.  health check REAL: spawn de `agent.mjs --eec-health` → exit 0 + {"eec":"healthy"} → IDLE + HEALTHY
+✅ 4.  tarea creada y asignada
+✅ 5.  política REQUIRE_APPROVAL fuerza aprobación humana del task.start (también al operador)
+✅ 6.  aprobación concedida → comando reanudado (EXECUTED)
+✅ 7.  proceso REAL iniciado, separado del web — pid=3809 exec=bun
+✅ 8.  resultado estructurado validado: run=SUCCEEDED exit=0 dur=1715ms + evidencias
+✅ 8b. eventos persistentes con correlación (EventRecord por run)
+✅ 9.  resultado visible vía API operativa (outputsJson + /api/eec/agents + auditoría)
+✅ 10. cancelación: SIGTERM→SIGKILL, proceso KILLED (pid=3814), run CANCELLED
+✅ 11. fallo real exit=3 → run FAILED y task FAILED (no disfrazado)
+✅ 11b. crash sin result-line (exit=2) → FAILED `no_result_line` — resultado ambiguo honesto
+✅ 12. reconciliación post-reinicio: pid muerto → run UNRECONCILED + proceso UNRECONCILED
+✅ 13. autorización: agente sin permiso → REJECTED (permission_denied)
+       [HTTP] sin credencial → 401; suplantación SYSTEM → 401 (suite dedicada, 16/16)
+✅ 14. idempotencia: misma idempotencyKey → 1 sola tarea (duplicate:true)
+✅ 15. evidencia final: 4 procesos reales con pids distintos [3809, 3814, 3819, 3824], todos con fin registrado
+=== RESULTADO DEL PILOTO: 19/19 pasos OK ===
+```
+
+## Correspondencia con los 15 requisitos del §9
+
+| # | Requisito | Demostrado en |
+|---|---|---|
+| 1 | Registro y validación del manifiesto | piloto 1, 1b, 2, 2b |
+| 2 | Descubrimiento del agente | piloto 2 (registro → runtime CREATED → arrancable) |
+| 3 | Health check real | piloto 3 (spawn real con marca `{"eec":"healthy"}`) |
+| 4 | Creación de tarea | piloto 4 |
+| 5 | Aprobación cuando la política lo exige | piloto 5-6 (política activa temporal) |
+| 6 | Inicio real del proceso | piloto 7 (`ExecutionProcess.pid` real, distinto del web) |
+| 7 | Resultado estructurado | piloto 8 (NDJSON `result` validado; exit 0) |
+| 8 | Persistencia de ejecución y eventos | piloto 8, 8b (ExecutionProcess + Artifact + EventRecord) |
+| 9 | Visualización en panel/API | piloto 9 + sección "Observabilidad operativa" del inspector |
+| 10 | Cancelación y timeout | piloto 10 (cancel) + integración `timeout: …` (8s, proceso killed) |
+| 11 | Fallo real y recuperación controlada | piloto 11, 11b (exit≠0, crash sin result) |
+| 12 | Reinicio y reconciliación | piloto 12 (misma función que corre en boot) + `UNRECONCILED` |
+| 13 | Rechazo de no autorizadas | piloto 13 + suite HTTP 16/16 (401/suplantación/422) |
+| 14 | Prevención de duplicados | piloto 14 + test 23/24 de aceptación (idempotencia) |
+| 15 | Evidencia de que el proceso existió y terminó | piloto 15 (pids distintos, exit codes, artifacts, duraciones) |
+
+## Evidencia persistente (consultable en BD)
+
+- `ExecutionProcess`: ejecutable, args, workdir, **pid**, status (`SPAWNED/ALIVE/EXITED/KILLED/TIMEOUT/UNRECONCILED`), **exitCode**, señal, duración.
+- `Artifact` (`PROCESS_STDOUT`/`PROCESS_STDERR`): salida **redactada** con `metadataJson{runId-like, redacted:true}`.
+- `EventRecord`: `run.started/run.failed/run.cancelled/task.state.changed…` con `correlationId`.
+- `AuditRecord`: registro, arranque, aprobaciones, rechazos.
+
+## Nota honesta sobre el paso 12 (reinicio)
+
+La reconciliación se ejercita invocando la MISMA función `reconcileProcessesAfterBoot()` que `bootEEC()` ejecuta en cada arranque, contra un estado persistido sintético (pid muerto). El reinicio real del proceso web no puede automatizarse dentro del piloto en este entorno (procesos de fondo efímeros); el código path es idéntico y la limitación está documentada en `06-MATRIZ-CAPACIDADES.md`.

@@ -79,6 +79,14 @@ async function runtimeLoopTick(): Promise<void> {
           if (result.error) {
             await db.run.update({ where: { id: run.id }, data: { status: 'FAILED', error: result.error, completedAt: new Date() } })
             await eventBus.publish({ event_type: 'run.failed', source: 'eec.runtime-loop', subject: `run:${run.id}`, payload: { runId: run.id, error: result.error }, sim })
+            // EEC V2 (§5): la tarea NO puede quedar IN_PROGRESS si su ejecución falló.
+            // Transición validada; si ya está en otro estado (p.ej. CANCELLED) se respeta.
+            if (run.taskId) {
+              try {
+                const { setTaskState } = await import('./state')
+                await setTaskState(run.taskId, 'FAILED', `run.failed: ${result.error.slice(0, 120)}`, sim)
+              } catch { /* estado ya resuelto por otra vía (cancel/retry) */ }
+            }
           } else {
             await completeRunWithEvaluation({
               runId: run.id, taskId: run.taskId!, agentId: agent.id,

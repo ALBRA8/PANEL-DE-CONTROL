@@ -21,6 +21,8 @@ export const COMMAND_SCHEMAS: Record<string, z.ZodTypeAny> = {
     capabilities: z.array(z.string()).default([]),
     skills: z.array(z.string()).default([]),
     clearance: z.string().default('INTERNAL'),
+    /** EEC V2: manifiesto del contrato común de agentes (validado en el handler). */
+    manifest: z.unknown().optional(),
   }),
   'agent.start': z.object({ agentId: id.optional(), code: z.string().optional() }).refine(a => a.agentId || a.code, 'agentId o code requerido'),
   'agent.pause': z.object({ agentId: id }),
@@ -43,7 +45,7 @@ export const COMMAND_SCHEMAS: Record<string, z.ZodTypeAny> = {
     kind: z.string().default('generic'),
   }),
   'task.assign': z.object({ taskId: id, agentId: id }),
-  'task.start': z.object({ taskId: id }),
+  'task.start': z.object({ taskId: id, /** EEC V2: entrada estructurada de la ejecución (viaja por STDIN, nunca por shell). */ input: z.record(z.string(), z.unknown()).optional() }),
   'task.pause': z.object({ taskId: id, reason: z.string().optional() }),
   'task.resume': z.object({ taskId: id }),
   'task.cancel': z.object({ taskId: id, reason: z.string().optional() }),
