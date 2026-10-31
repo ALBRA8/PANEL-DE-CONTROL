@@ -66,3 +66,7 @@ nohup.out
 *.db-wal
 /tool-results/
 /worklog.md
+
+# respaldos de recuperacion de BD (solo locales)
+db/backup-corrupt-*
+db/recover-work/

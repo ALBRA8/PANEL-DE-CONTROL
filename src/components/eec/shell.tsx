@@ -145,6 +145,10 @@ const SCROLLBAR_CSS = `
 .eec-scroll::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 8px; }
 .eec-scroll::-webkit-scrollbar-thumb:hover { background: #334155; }
 .eec-scroll { scrollbar-width: thin; scrollbar-color: #1e293b transparent; }
+/* Modo claro: thumb gris claro sobre fondos blancos */
+html:not(.dark) .eec-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; }
+html:not(.dark) .eec-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+html:not(.dark) .eec-scroll { scrollbar-color: #cbd5e1 transparent; }
 `
 
 function ViewSkeleton() {
@@ -548,7 +552,8 @@ export default function EecShell() {
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100">
       <style dangerouslySetInnerHTML={{ __html: SCROLLBAR_CSS }} />
-      <Toaster theme="dark" position="bottom-right" richColors closeButton />
+      {/* Sin theme fijo: sigue el tema activo (claro/oscuro) vía next-themes. */}
+      <Toaster position="bottom-right" richColors closeButton />
       <CommandPalette />
 
       {/* Sidebar desktop colapsable */}
