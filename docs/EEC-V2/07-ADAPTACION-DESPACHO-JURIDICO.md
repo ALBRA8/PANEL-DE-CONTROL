@@ -2,6 +2,7 @@
 
 Fecha: 2026-11-01 · Rama: `feature/v2-adaptacion-verticales` (base `main` @ `2355735`) · Autor: constructor EEC V2
 Fuente analizada: `ALBRA8/DESPACHO-JURIDICO` @ `d839eb0` (shallow clone leído localmente; Python 3.10+, 1072 tests, V2.5)
+- **Rev 1.1 (2026-11-01)**: corrección de enfoque del propietario — EEC como **administración general** del ecosistema (§0.1); el paquete administrativo (feature flags + usage por organización) sube de post-piloto a P2.
 
 ---
 
@@ -31,6 +32,29 @@ Esta no es una opinión nuestra: es la decisión `DJ-002` del propio despacho (*
 ```
 
 Regla de oro: **el despacho pasa a ser consumidor del EEC (contrato + adaptador), no fuente de lógica horizontal.** Adoptamos patrones clean-room (como hizo ellos con sus 27 referentes), nunca código: el gemelo es Python y el EEC es TypeScript.
+
+## 0.1 Rev 1.1 — Enfoque reforzado: el EEC es la ADMINISTRACIÓN GENERAL del ecosistema
+
+Corrección de rumbo del propietario (2026-11-01): *"somos más administrativos; aquí vamos a organizar algo más grande"*. Esta matriz se relee con ese acento: el EEC no es solo el plano de control técnico — es su **administración general**: el back-office que organiza N organizaciones × M verticales × flotas de agentes, aplicando a las unidades del ecosistema las mismas funciones que una gerencia corporativa aplica a sus filiales.
+
+| Función administrativa clásica | Expresión en el EEC | Ítems de esta matriz que la sirven |
+|---|---|---|
+| Registro de unidades organizativas (alta/baja de filiales) | `Organization` como raíz + onboarding de verticales vía INSTALADOR | #2, #21, #25 |
+| Delegación con niveles de firma (poderes y quórum) | Pipeline de `Approval` + `minimumHumanSignoff` | #4 → P0-3 |
+| Escritura pública y custodia de actas | `AuditRecord` con cadena hash SHA-256 (tamper-evident) | #5 → P0-1 |
+| Expediente con evidencia verificada | Evidence Gate `claim-or-refuse` + provenance por hash | #3, #15 → P0-2, P2-3 |
+| Control de plazos y SLA | Motor genérico de términos + `deadline_near` + escalamiento | #6, #17 → P1-2 |
+| Presupuesto y control del gasto | Metering `ToolInvocation` + agregación de usage por organización | #22 → P2-4 |
+| Órganos de control (revisión previa de actos críticos) | Revisión adversarial pre-dispatch como policy check | #11 → P1-3 |
+| Gobierno del conocimiento (actas tentativas → aprobadas) | `KnowledgeItem` `tentative → confirmed` | #19 → P2 |
+| Administración por unidad (configuración por filial) | Feature flags por organización | #21 → P2-4 |
+
+Consecuencias prácticas sobre esta matriz:
+
+1. **El orden P0 no cambia — se justifica mejor**: evidencia, auditoría y quórum no son "features de seguridad": son la **escritura pública** de la administración. Sin actas fiables no hay administración, y sin quórum no hay delegación real de poder.
+2. **El paquete administrativo sube de "post-piloto" a P2 explícito (P2-4)**: feature flags por organización (#21) + agregación de usage/coste por organización (#22) son el mínimo para administrar *algo más grande* — varias organizaciones — y no solo una instancia. La tabla de §4 refleja el ascenso.
+3. **Lo jurídico queda todavía más fuera**: el EEC no administra casos jurídicos; administra organizaciones que a su vez administran su dominio. Prueba del diseño: cada fila de la tabla anterior tiene sentido idéntico para un despacho, un contador o cualquier vertical futuro.
+4. **Lectura del diagrama de §0**: el EEC administra verticales como una gerencia administra filiales — contrato, delegación, plazos, presupuesto, actas y auditoría; nunca opera su oficio.
 
 ## 1. Método
 
@@ -143,6 +167,7 @@ El gate del gemelo niega afirmaciones legales sin cita oficial. Generalización 
 | P2-1 | Eval harness con rúbricas (#13) | 6 | runner de rúbricas en piloto E2E |
 | P2-2 | Doctor del sistema (#26) | 6 | vista Sistema con verificaciones reales |
 | P2-3 | Provenance de evidencia (#15) | 2+4 | campos hash/source/verifiedAt en evidencias |
+| P2-4 | **Paquete administrativo**: feature flags por org (#21) + usage/coste por org (#22) | 6+ | alta de una segunda organización con flags propios y coste visible en Sistema |
 | P3 (post-piloto) | MCP runtime type (#14), feature flags por org (#21), usage records (#22), marketplace (#20) | — | diseño ya esbozado en esta matriz |
 
 Enmiendas mínimas a documentos existentes: `02-CONTRATO-AGENTES.md` (añadir `EvidenceRef` + handoff), `04-SEGURIDAD.md` (AuditChain + quórum), `05-PILOTO-E2E.md` (casos adversariales), `06-MATRIZ-CAPACIDADES.md` (estado de los ítems P0-P3).
