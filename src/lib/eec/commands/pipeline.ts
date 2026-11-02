@@ -12,6 +12,7 @@ import { eventBus } from '../events/bus'
 import { eecAls, newTrace, withTrace, currentTrace, log, recordMetric } from '../engine/observability'
 import { writeAudit } from '../engine/audit'
 import { getCommandSchema, isKnownCommand } from './registry'
+import { evaluateEvidenceGate } from '../security/evidence'
 
 export interface CommandInput {
   type: string
@@ -284,6 +285,33 @@ async function executeCommand(
   }
   try {
     const result = await handler({ payload, commandId, requesterId, requesterType, sim, traceId: cmdRow?.traceId ?? null })
+    // P0-2 (doc 07 §3.2): Evidence Gate fail-closed — una salida exigente sin
+    // evidencia verificada NO se marca ejecutada NI se publica en el bus.
+    const gate = await evaluateEvidenceGate(type, result)
+    if (gate.required && !gate.ok) {
+      await db.commandRecord.update({
+        where: { id: commandId },
+        data: {
+          status: 'BLOCKED_MISSING_EVIDENCE',
+          rejectionReason: `evidence_gate:${gate.policy}:${gate.missing.join(',')}`.slice(0, 500),
+          resultJson: JSON.stringify(result ?? {}),
+          executedAt: new Date(),
+          sim,
+        },
+      })
+      await eventBus.publish({
+        event_type: 'evidence.missing', source: 'eec.pipeline', subject: `command:${commandId}`,
+        payload: { commandType: type, policy: gate.policy, missing: gate.missing, requesterId }, sim,
+      })
+      await writeAudit({
+        actorId: 'eec:pipeline', actorType: 'COMMAND_PIPELINE', action: 'command.evidence.blocked',
+        entityType: 'COMMAND', entityId: commandId, result: 'BLOCKED_MISSING_EVIDENCE',
+        why: `evidence_gate:${gate.policy}: ${gate.missing.join(',')}`,
+        output: { claimTags: (result as { claimTags?: unknown })?.claimTags ?? [] },
+      })
+      await recordMetric('eec.evidence.blocked', 1, { type })
+      return { commandId, status: 'BLOCKED_MISSING_EVIDENCE', ok: false, error: 'missing_verified_evidence', result, traceId: cmdRow?.traceId ?? undefined }
+    }
     await db.commandRecord.update({
       where: { id: commandId },
       data: { status: 'EXECUTED', resultJson: JSON.stringify(result ?? {}), executedAt: new Date(), sim },

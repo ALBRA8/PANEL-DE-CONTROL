@@ -106,6 +106,20 @@ export interface ToolExecutionOutput {
   cost?: number
   simulated?: boolean
   error?: string
+  /** P0-2 (doc 07 §3.2): evidencia que respalda la salida (claim-or-refuse). */
+  evidence?: EvidenceRef[]
+}
+
+// ---------- EVIDENCE (P0-2 · doc 07 §3.2) ----------
+/** Referencia de evidencia: el vertical define qué es "fuente aceptable". */
+export interface EvidenceRef {
+  id: string
+  source: string
+  kind: string
+  /** hash del contenido evidenciado (provenance, doc 07 §2.3 #15) */
+  hash?: string
+  /** instante de verificación — sin él la evidencia NO cuenta como verificada */
+  verifiedAt?: string
 }
 
 // ---------- MEMORY INTERFACE (spec §18) ----------

@@ -235,7 +235,7 @@ model CommandRecord {
   payloadJson      String    @default("{}")
   requesterId      String?
   requesterType    String    @default("HUMAN")
-  // RECEIVED|VALIDATED|AUTHORIZED|POLICY_CHECKED|DISPATCHED|EXECUTED|REJECTED|FAILED|DUPLICATE
+  // RECEIVED|VALIDATED|AUTHORIZED|POLICY_CHECKED|DISPATCHED|EXECUTED|REJECTED|FAILED|DUPLICATE|BLOCKED_MISSING_EVIDENCE
   status           String    @default("RECEIVED")
   rejectionReason  String?
   resultJson       String?
