@@ -271,10 +271,15 @@ model AuditRecord {
   sim            Boolean  @default(false)
   // cadena inmutable: correcciones = nuevo registro apuntando al previo
   prevAuditId    String?
+  // P0-1 (doc 07 §3.1): cadena hash SHA-256 tamper-evident (sello en writeAudit)
+  prevHash       String?
+  thisHash       String?
+  chainSeq       Int?
   createdAt      DateTime @default(now())
 
   @@index([entityType, entityId])
   @@index([createdAt])
+  @@index([chainSeq])
 }
 
 model Span {
@@ -410,6 +415,10 @@ model Approval {
   risk          String    @default("HIGH")
   payloadJson   String    @default("{}")
   requestedById String?
+  // P0-3 (doc 07 §3.3): quórum humano — firmas HUMANAS distintas requeridas
+  minimumHumanSignoff Int     @default(1)
+  // P0-3: firmas acumuladas [{by, at, note}] hasta alcanzar el quórum
+  signaturesJson      String  @default("[]")
   // REQUESTED|APPROVED|REJECTED|EXPIRED|CANCELLED
   status        String    @default("REQUESTED")
   decidedById   String?

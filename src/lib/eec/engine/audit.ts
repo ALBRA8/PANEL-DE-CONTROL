@@ -1,12 +1,15 @@
 // ============================================================
-// EEC — AUDIT (spec §28)
+// EEC — AUDIT (spec §28 + doc 07 §3.1 P0-1)
 // Toda operación significativa es reconstruible: WHO/WHAT/WHEN/WHY/
 // INPUT/OUTPUT/TOOLS/PERMISSIONS/RESULT/COST.
 // Los registros NO se mutan: las correcciones crean registros nuevos
 // encadenados vía prevAuditId.
+// P0-1: cada registro se SELLA al crearlo con la cadena hash SHA-256
+// (audit-chain.ts). Único punto de creación de auditoría del sistema.
 // ============================================================
 import { db } from '../../../lib/db'
 import { currentTrace, sanitize } from './observability'
+import { sealAuditRecord } from './audit-chain'
 
 export interface AuditInput {
   actorId: string
@@ -22,6 +25,8 @@ export interface AuditInput {
   result?: string
   cost?: number
   sim?: boolean
+  /** P0-1: encadenamiento referencial de correcciones (se sella junto al resto). */
+  prevAuditId?: string
 }
 
 export async function writeAudit(a: AuditInput): Promise<string> {
@@ -43,18 +48,42 @@ export async function writeAudit(a: AuditInput): Promise<string> {
       traceId: t?.traceId ?? null,
       correlationId: t?.correlationId ?? null,
       sim: a.sim ?? t?.sim ?? false,
+      prevAuditId: a.prevAuditId ?? null,
     },
   })
+  // P0-1: sello de cadena. Si falla, el registro SOBREVIVE sin sello
+  // (chainSeq null) y la verificación declara el hueco: nunca se pierde
+  // una entrada de auditoría por fallo del sello.
+  try {
+    await sealAuditRecord({
+      id: rec.id,
+      actorId: rec.actorId,
+      actorType: rec.actorType,
+      action: rec.action,
+      entityType: rec.entityType,
+      entityId: rec.entityId,
+      why: rec.why,
+      inputJson: rec.inputJson,
+      outputJson: rec.outputJson,
+      toolsJson: rec.toolsJson,
+      permissionsJson: rec.permissionsJson,
+      result: rec.result,
+      cost: rec.cost,
+      traceId: rec.traceId,
+      correlationId: rec.correlationId,
+      sim: rec.sim,
+      prevAuditId: rec.prevAuditId,
+      createdAt: rec.createdAt,
+    })
+  } catch (err) {
+    console.error('[audit-chain] fallo al sellar registro', rec.id, err)
+  }
   return rec.id
 }
 
-/** Corrección inmutable: crea un NUEVO registro encadenado al anterior. */
+/** Corrección inmutable: crea un NUEVO registro encadenado (creación+sello atómicos). */
 export async function correctAudit(prevAuditId: string, correction: AuditInput, why: string): Promise<string> {
-  return writeAudit({ ...correction, why: `correction:${why}` })
-    .then(async id => {
-      await db.auditRecord.update({ where: { id }, data: { prevAuditId } })
-      return id
-    })
+  return writeAudit({ ...correction, why: `correction:${why}`, prevAuditId })
 }
 
 /** Reconstrucción completa de una entidad a partir de su cola de auditoría + eventos. */

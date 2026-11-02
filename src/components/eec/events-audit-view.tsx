@@ -147,6 +147,28 @@ function shortTime(iso: string): string {
   }
 }
 
+
+// ---------- P0-1 (doc 07 §3.1): badge del estado de la cadena de auditoría ----------
+// Declarado vs observado: verde = cadena verificada; rojo = cadena ROTA.
+function AuditChainBadge() {
+  const [chain, setChain] = useState<{ ok: boolean; verified: number } | null>(null)
+  useEffect(() => {
+    fetch('/api/eec/audit/chain')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d) setChain({ ok: !!d.ok, verified: d.verified ?? 0 }) })
+      .catch(() => undefined)
+  }, [])
+  if (!chain) return null
+  return (
+    <span
+      className={`ml-1 inline-block h-2 w-2 rounded-full align-middle ${chain.ok ? 'bg-emerald-500' : 'bg-red-500'}`}
+      title={chain.ok
+        ? `Cadena de auditoría verificada (${chain.verified} registros sellados)`
+        : 'Cadena de auditoría ROTA — ver /api/eec/audit/chain'}
+    />
+  )
+}
+
 export default function EventsAuditView() {
   const events = useEecStore((s) => s.events)
   const connected = useEecStore((s) => s.connected)
@@ -414,7 +436,7 @@ export default function EventsAuditView() {
       <Tabs value={tab} onValueChange={setTab} className="gap-4">
         <TabsList className="flex-wrap bg-slate-900/80">
           <TabsTrigger value="events" className="text-xs sm:text-sm">Eventos en vivo</TabsTrigger>
-          <TabsTrigger value="audit" className="text-xs sm:text-sm">Auditoría</TabsTrigger>
+          <TabsTrigger value="audit" className="text-xs sm:text-sm">Auditoría <AuditChainBadge /></TabsTrigger>
           <TabsTrigger value="recon" className="text-xs sm:text-sm">Reconstrucción</TabsTrigger>
           <TabsTrigger value="commands" className="text-xs sm:text-sm">Comandos</TabsTrigger>
         </TabsList>
