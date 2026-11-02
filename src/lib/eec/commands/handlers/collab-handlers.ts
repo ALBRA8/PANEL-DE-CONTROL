@@ -185,6 +185,7 @@ export function registerCollabHandlers(): void {
       requestType: string; title: string; description?: string; subjectType?: string
       subjectId?: string; risk: string; payload: Record<string, unknown>
       ttlMinutes: number; requestedById?: string; resumeCommandId?: string
+      minimumHumanSignoff?: number
     }
     const approval = await db.approval.create({
       data: {
@@ -192,6 +193,7 @@ export function registerCollabHandlers(): void {
         title: p.title, description: p.description, risk: p.risk,
         payloadJson: JSON.stringify({ ...p.payload, resumeCommandId: p.resumeCommandId }),
         requestedById: p.requestedById ?? requesterId,
+        minimumHumanSignoff: p.minimumHumanSignoff ?? 1,
         expiresAt: new Date(Date.now() + p.ttlMinutes * 60_000),
       },
     })
@@ -208,9 +210,27 @@ export function registerCollabHandlers(): void {
     const approval = await db.approval.findUnique({ where: { id: p.approvalId } })
     if (!approval) throw new Error('APPROVAL_NOT_FOUND')
     if (approval.status !== 'REQUESTED') throw new Error(`APPROVAL_NOT_PENDING:${approval.status}`)
+    // P0-3 (doc 07 §3.3): quórum — firmas HUMANAS DISTINTAS hasta minimumHumanSignoff.
+    const signer = requesterId ?? 'operator'
+    const signatures = JSON.parse(approval.signaturesJson || '[]') as Array<{ by: string; at: string; note?: string | null }>
+    if (signatures.some(s => s.by === signer)) throw new Error(`APPROVAL_ALREADY_SIGNED_BY:${signer}`)
+    signatures.push({ by: signer, at: new Date().toISOString(), note: p.note ?? null })
+    const required = Math.max(1, approval.minimumHumanSignoff ?? 1)
+    if (signatures.length < required) {
+      await db.approval.update({
+        where: { id: approval.id },
+        data: { signaturesJson: JSON.stringify(signatures) },
+      })
+      await eventBus.publish({
+        event_type: 'approval.signature.recorded', source: 'eec.approvals', subject: `approval:${approval.id}`,
+        payload: { approvalId: approval.id, signatures: signatures.length, required, latestBy: signer }, sim,
+      })
+      await writeAudit({ actorId: signer, actorType: 'HUMAN', action: 'approval.signature.recorded', entityType: 'APPROVAL', entityId: approval.id, result: 'AWAITING_SIGNOFF', why: p.note, output: { signatures: signatures.length, required } })
+      return { approvalId: approval.id, status: 'AWAITING_SIGNOFF', signatures: signatures.length, required }
+    }
     await db.approval.update({
       where: { id: approval.id },
-      data: { status: 'APPROVED', decidedById: requesterId ?? 'operator', decidedAt: new Date(), decisionNote: p.note },
+      data: { status: 'APPROVED', decidedById: signer, decidedAt: new Date(), decisionNote: p.note, signaturesJson: JSON.stringify(signatures) },
     })
     await eventBus.publish({
       event_type: 'approval.approved', source: 'eec.approvals', subject: `approval:${approval.id}`,

@@ -219,6 +219,17 @@ export async function dispatchCommand(input: CommandInput): Promise<CommandResul
 
       // ---------- GATE DE APROBACIÓN HUMANA (§24) ----------
       if (needsApproval) {
+        // P0-3 (doc 07 §3.3): quórum humano — la política puede exigir N firmas
+        // distintas; CRITICAL exige mínimo 2 (delegación real de poder).
+        let minSignoff = 1
+        if (forcedApproval) {
+          const pol = await db.policy.findUnique({ where: { code: forcedApproval } })
+          const cond = safeParse<Record<string, unknown>>(pol?.conditionsJson ?? undefined, {})
+          if (typeof cond.minHumanSignoff === 'number' && cond.minHumanSignoff >= 1) {
+            minSignoff = Math.floor(cond.minHumanSignoff)
+          }
+        }
+        if (effectiveRisk === 'CRITICAL') minSignoff = Math.max(minSignoff, 2)
         const approval = await db.approval.create({
           data: {
             requestType: 'COMMAND_APPROVAL',
@@ -229,6 +240,7 @@ export async function dispatchCommand(input: CommandInput): Promise<CommandResul
             risk: effectiveRisk,
             payloadJson: JSON.stringify({ commandType: input.type, payload, effectiveRisk }),
             requestedById: requesterId,
+            minimumHumanSignoff: minSignoff,
             expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
           },
         })

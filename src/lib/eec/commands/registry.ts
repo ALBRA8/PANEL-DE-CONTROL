@@ -93,6 +93,8 @@ export const COMMAND_SCHEMAS: Record<string, z.ZodTypeAny> = {
     requestedById: z.string().optional(),
     // comando pendiente que se reanudará al aprobar
     resumeCommandId: z.string().optional(),
+    // P0-3 (doc 07 §3.3): quórum humano explícito de esta solicitud
+    minimumHumanSignoff: z.number().int().min(1).default(1),
   }),
   'approval.approve': z.object({ approvalId: id, note: z.string().optional() }),
   'approval.reject': z.object({ approvalId: id, note: z.string().optional() }),
