@@ -466,6 +466,8 @@ function subscribeNotificationRouter(): void {
     'task.deadline_near': { severity: 'WARNING', title: p => `Plazo cerca: ${String(p.title ?? p.taskId)} (${String(p.minutesLeft)} min)` },
     'task.overdue': { severity: 'ERROR', title: p => `PLAZO VENCIDO: ${String(p.title ?? p.taskId)}` },
     'approval.deadline_near': { severity: 'WARNING', title: p => `Aprobación por expirar: ${String(p.title ?? p.approvalId)}` },
+    'adversarial.blocked': { severity: 'ERROR', title: p => `Órgano de control BLOQUEÓ ${String(p.commandType)} (score ${String(p.score)})` },
+    'adversarial.review': { severity: 'WARNING', title: p => `Órgano de control pide revisión: ${String(p.commandType)} (score ${String(p.score)})` },
   }
 
   eventBus.subscribe('*', async (event) => {

@@ -13,6 +13,7 @@ import { eecAls, newTrace, withTrace, currentTrace, log, recordMetric } from '..
 import { writeAudit } from '../engine/audit'
 import { getCommandSchema, isKnownCommand } from './registry'
 import { evaluateEvidenceGate } from '../security/evidence'
+import { reviewAdversarial } from '../security/adversarial'
 
 export interface CommandInput {
   type: string
@@ -211,8 +212,35 @@ export async function dispatchCommand(input: CommandInput): Promise<CommandResul
         })
         return reject(cmd.id, `policy_denied:${deniedBy}`, cmd, true)
       }
+      // ---------- P1-3 (doc 07 §3.5): REVISIÓN ADVERSARIAL PRE-DISPATCH ----------
+      // Órgano de control determinístico: BLOCK → rechaza; REVIEW → segunda
+      // mirada (gate humano para agentes; evento observable para humanos,
+      // cuya autoridad implícita no se bloquea a sí misma).
+      const adversarial = await reviewAdversarial(input.type, payload, requesterType)
+      if (adversarial.decision === 'BLOCK') {
+        const rules = adversarial.findings.map(f => f.rule).join(',')
+        await eventBus.publish({
+          event_type: 'adversarial.blocked', source: 'eec.pipeline', subject: `command:${cmd.id}`,
+          payload: { commandType: input.type, requesterId, requesterType, score: adversarial.score, findings: adversarial.findings }, sim,
+        })
+        await writeAudit({
+          actorId: 'eec:pipeline', actorType: 'COMMAND_PIPELINE', action: 'command.adversarial.blocked',
+          entityType: 'COMMAND', entityId: cmd.id, input: payload, result: 'BLOCKED_ADVERSARIAL',
+          why: `adversarial:score=${adversarial.score}:${rules}`, sim,
+        })
+        await recordMetric('eec.adversarial.blocked', 1, { type: input.type })
+        return reject(cmd.id, `adversarial_blocked:score=${adversarial.score}:${rules}`, cmd, true)
+      }
+      if (adversarial.decision === 'REVIEW') {
+        await eventBus.publish({
+          event_type: 'adversarial.review', source: 'eec.pipeline', subject: `command:${cmd.id}`,
+          payload: { commandType: input.type, requesterId, requesterType, score: adversarial.score, findings: adversarial.findings }, sim,
+        })
+        await recordMetric('eec.adversarial.review', 1, { type: input.type })
+      }
       const needsApproval = !input.skipApprovalOnce && requesterType !== 'SYSTEM' &&
-        (forcedApproval !== undefined || (requiresApproval(effectiveRisk) && requesterType !== 'HUMAN'))
+        (forcedApproval !== undefined || (adversarial.decision === 'REVIEW' && requesterType === 'AGENT') ||
+          (requiresApproval(effectiveRisk) && requesterType !== 'HUMAN'))
       await db.commandRecord.update({
         where: { id: cmd.id },
         data: { status: 'POLICY_CHECKED', risk: effectiveRisk },
