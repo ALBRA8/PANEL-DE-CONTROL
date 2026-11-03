@@ -122,6 +122,25 @@ export interface EvidenceRef {
   verifiedAt?: string
 }
 
+// ---------- HANDOFF (P1-1 · doc 07 §3.4 / matriz #24) ----------
+/** Sobre de traspaso (entrega-recepción) entre agentes/unidades.
+ *  Fail-closed: el dossier solo admite EvidenceRef verificados
+ *  (source + hash + verifiedAt) y la recepción exige ACK explícito. */
+export interface HandoffEnvelope {
+  handoffId: string
+  from: { agentId: string; code: string; role?: string }
+  to: { agentId: string; code: string; role?: string }
+  subject: string
+  summary: string
+  /** expediente traspasado — todo elemento debe estar verificado */
+  dossier: EvidenceRef[]
+  /** asuntos abiertos que el receptor hereda */
+  openItems: string[]
+  guarantees: { completeness: 'FULL' | 'PARTIAL'; declaredAt: string }
+  /** la entrega no es recepción: siempre exige confirmación */
+  ackRequired: true
+}
+
 // ---------- MEMORY INTERFACE (spec §18) ----------
 export interface MemoryInterface {
   readonly providerKey: string

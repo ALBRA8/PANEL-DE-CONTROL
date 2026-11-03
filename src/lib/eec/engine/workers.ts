@@ -337,6 +337,9 @@ function subscribeNotificationRouter(): void {
     'system.permission.denied': { severity: 'WARNING', title: p => `Permiso denegado: ${String(p.commandType)}` },
     'system.policy.denied': { severity: 'WARNING', title: p => `Política denegó comando: ${String(p.commandType)}` },
     'client.stage.changed': { severity: 'INFO', title: p => `CRM: ${String(p.name ?? '')} → ${String(p.to)}` },
+    'handoff.created': { severity: 'INFO', title: p => `Traspaso recibido: ${String(p.subject ?? p.handoffId)}` },
+    'handoff.acknowledged': { severity: 'INFO', title: p => `Traspaso confirmado: ${String(p.subject ?? p.handoffId)}` },
+    'handoff.rejected': { severity: 'WARNING', title: p => `Traspaso rechazado: ${String(p.subject ?? p.handoffId)}` },
   }
 
   eventBus.subscribe('*', async (event) => {

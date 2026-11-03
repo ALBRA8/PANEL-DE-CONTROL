@@ -156,6 +156,23 @@ export const COMMAND_SCHEMAS: Record<string, z.ZodTypeAny> = {
     commandPayload: z.record(z.string(), z.unknown()).default({}),
     enabled: z.boolean().default(true),
   }),
+  'handoff.create': z.object({
+    fromAgentId: id,
+    toAgentId: id,
+    subject: z.string().min(3),
+    summary: z.string().default(''),
+    dossier: z.array(z.object({
+      id: z.string().min(1),
+      source: z.string().min(1),
+      kind: z.string().min(1),
+      hash: z.string().optional(),
+      verifiedAt: z.string().optional(),
+    })).default([]),
+    openItems: z.array(z.string()).default([]),
+    completeness: z.enum(['FULL', 'PARTIAL']).default('FULL'),
+  }),
+  'handoff.ack': z.object({ handoffId: id, note: z.string().optional() }),
+  'handoff.reject': z.object({ handoffId: id, reason: z.string().min(3) }),
   'schedule.toggle': z.object({ scheduleId: id, enabled: z.boolean() }),
 
   // ---- memoria / conocimiento / tools ----

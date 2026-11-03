@@ -23,7 +23,7 @@ function safeParse<T>(json: string | null | undefined, fallback: T): T {
   try { return JSON.parse(json || '') as T } catch { return fallback }
 }
 
-function isVerifiedEvidence(e: unknown): boolean {
+export function isVerifiedEvidence(e: unknown): boolean {
   if (!e || typeof e !== 'object') return false
   const r = e as Record<string, unknown>
   return (

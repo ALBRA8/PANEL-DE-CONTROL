@@ -7,6 +7,7 @@ import { registerTaskHandlers } from './handlers/task-handlers'
 import { registerWorkflowHandlers } from './handlers/workflow-handlers'
 import { registerCollabHandlers } from './handlers/collab-handlers'
 import { registerBizHandlers } from './handlers/biz-handlers'
+import { registerHandoffHandlers } from './handlers/handoff-handlers'
 
 const globalForReg = globalThis as unknown as { __eecHandlersRegistered?: boolean }
 
@@ -17,6 +18,7 @@ export function ensureHandlersRegistered(): void {
   registerWorkflowHandlers()
   registerCollabHandlers()
   registerBizHandlers()
+  registerHandoffHandlers()
   globalForReg.__eecHandlersRegistered = true
 }
 

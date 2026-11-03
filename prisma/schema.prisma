@@ -655,6 +655,29 @@ model Message {
 
 // ============ SCHEDULER ============
 
+// P1-1 (doc 07 §3.4): acta de entrega-recepción (traspaso) entre agentes/unidades
+model Handoff {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  fromAgentId    String
+  toAgentId      String
+  subject        String
+  summary        String    @default("")
+  dossierJson    String    @default("[]")
+  openItemsJson  String    @default("[]")
+  guaranteesJson String    @default("{}")
+  // CREATED|ACKNOWLEDGED|REJECTED|CANCELLED
+  status         String    @default("CREATED")
+  ackedAt        DateTime?
+  ackNote        String?
+  traceId        String?
+  sim            Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+
+  @@index([toAgentId, status])
+  @@index([fromAgentId])
+}
+
 model Schedule {
   id                  String    @id @default(cuid())
   name                String

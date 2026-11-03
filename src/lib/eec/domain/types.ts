@@ -193,6 +193,7 @@ export const COMMAND_RISK: Record<string, RiskLevel> = {
   'calendar.create': 'LOW', 'schedule.create': 'MEDIUM', 'schedule.toggle': 'MEDIUM',
   'memory.write': 'LOW', 'knowledge.publish': 'MEDIUM', 'tool.invoke': 'MEDIUM',
   'notification.read': 'LOW', 'audit.correct': 'HIGH',
+  'handoff.create': 'MEDIUM', 'handoff.ack': 'LOW', 'handoff.reject': 'LOW',
   'system.simulation.toggle': 'HIGH', 'system.chaos.runtime_crash': 'HIGH',
   'system.deadletter.retry': 'MEDIUM',
 }
