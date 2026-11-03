@@ -5,6 +5,8 @@
 // - HeartbeatMonitor: latidos de runtime; timeouts → UNHEALTHY → CRASHED.
 // - SchedulerRunner: ONE_TIME / RECURRING(cron) / EVENT / DEPENDENCY.
 // - ApprovalExpiry: expiración de aprobaciones (§24).
+// - SLAMonitor (P1-2 · doc 07 #17): escalera de plazos WARNING→CRITICAL→OVERDUE.
+// - Reglas EVENT_TRIGGERED (P1-2): on(evento) → comando con plantillas {{event.*}}.
 // - NotificationRouter: eventos → notificaciones según políticas (§42).
 // ============================================================
 import { db } from '../../../lib/db'
@@ -13,6 +15,7 @@ import { dispatchCommand, isSimulationMode } from '../commands/pipeline'
 import { completeRunWithEvaluation } from '../commands/handlers/task-handlers'
 import { eecAls, newTrace, withTrace, recordMetric, log } from './observability'
 import type { AgentInterface, NotificationInterface } from '../domain/contracts'
+import type { EventEnvelope } from '../domain/types'
 
 interface WorkerHandle { timer: NodeJS.Timeout; name: string }
 const globalForWorkers = globalThis as unknown as {
@@ -300,6 +303,126 @@ async function schedulerTick(): Promise<void> {
   }
 }
 
+// ---------------- SLA MONITOR (P1-2 · doc 07 #17: plazos) ----------------
+// Escalera administrativa de plazos: WARNING (< 24 h) → CRITICAL (< 1 h) →
+// OVERDUE (vencido). Cada nivel se emite UNA sola vez por tarea (dedup
+// persistente consultando el propio bus: honestidad sin tormentas de eventos;
+// sobrevive reinicios del proceso, a diferencia de un Set en memoria).
+const SLA_LADDER = [
+  { level: 'OVERDUE', maxMinutesLeft: 0, type: 'task.overdue' },
+  { level: 'CRITICAL', maxMinutesLeft: 60, type: 'task.deadline_near' },
+  { level: 'WARNING', maxMinutesLeft: 24 * 60, type: 'task.deadline_near' },
+] as const
+
+export async function slaMonitorTick(): Promise<void> {
+  const sim = isSimulationMode()
+  const now = Date.now()
+  const tasks = await db.task.findMany({
+    where: { dueAt: { not: null }, status: { notIn: ['DONE', 'CANCELLED', 'FAILED'] } },
+    take: 50, orderBy: { dueAt: 'asc' },
+  })
+  for (const t of tasks) {
+    const minutesLeft = Math.round(((t.dueAt as Date).getTime() - now) / 60_000)
+    const hit = SLA_LADDER.find(l => minutesLeft < l.maxMinutesLeft) // primer match = nivel más grave
+    if (!hit) continue
+    const already = await db.eventRecord.findFirst({
+      where: { type: hit.type, subject: `task:${t.id}`, payloadJson: { contains: `"level":"${hit.level}"` } },
+      select: { seq: true },
+    })
+    if (already) continue
+    await eventBus.publish({
+      event_type: hit.type, source: 'eec.sla', subject: `task:${t.id}`,
+      payload: {
+        taskId: t.id, code: t.code, title: t.title,
+        dueAt: (t.dueAt as Date).toISOString(), minutesLeft,
+        level: hit.level, assigneeAgentId: t.assigneeAgentId,
+      }, sim,
+    })
+  }
+  // plazos de aprobaciones pendientes: quórum por expirar → urge decidir
+  const pending = await db.approval.findMany({ where: { status: 'REQUESTED', expiresAt: { not: null } }, take: 50 })
+  for (const a of pending) {
+    const minutesLeft = Math.round(((a.expiresAt as Date).getTime() - now) / 60_000)
+    if (minutesLeft > 120 || minutesLeft < 0) continue
+    const already = await db.eventRecord.findFirst({
+      where: { type: 'approval.deadline_near', subject: `approval:${a.id}` },
+      select: { seq: true },
+    })
+    if (already) continue
+    await eventBus.publish({
+      event_type: 'approval.deadline_near', source: 'eec.sla', subject: `approval:${a.id}`,
+      payload: { approvalId: a.id, title: a.title, minutesLeft }, sim,
+    })
+  }
+}
+
+// ---------------- TRIGGERS POR EVENTO (P1-2 · doc 07 #17: on(evento) → comando) ----------------
+// Los Schedule EVENT_TRIGGERED escuchan el bus: expression = patrón de evento
+// ('task.deadline_near', 'task.*', ...). El payload del comando admite plantillas
+// {{event.payload.x}} resueltas con el envelope disparador. Regla administrativa
+// típica: on(task.deadline_near) → crear tarea de escalamiento auditable.
+// Idempotente por event_id; los eventos del propio puente no re-disparan reglas.
+function eventPatternMatches(pattern: string, type: string): boolean {
+  if (pattern === '*' || pattern === type) return true
+  if (pattern.endsWith('.*')) return type.startsWith(pattern.slice(0, -1))
+  return false
+}
+
+function resolveEventTemplate(v: unknown, env: Record<string, unknown>): unknown {
+  // la ruta capturada excluye el prefijo 'event.' — se resuelve desde env.event
+  const root = (env as Record<string, unknown>).event as Record<string, unknown> | undefined
+  const dig = (path: string, base: unknown): unknown =>
+    path.split('.').reduce<unknown>((acc, k) => (acc as Record<string, unknown> | undefined)?.[k], base)
+  if (typeof v === 'string') {
+    const full = v.match(/^\{\{event\.([\w.]+)\}\}$/)
+    if (full) return dig(full[1], root)
+    return v.replace(/\{\{event\.([\w.]+)\}\}/g, (_, path: string) => {
+      const val = dig(path, root)
+      return val === undefined || val === null ? '' : String(val)
+    })
+  }
+  if (Array.isArray(v)) return v.map(x => resolveEventTemplate(x, env))
+  if (v && typeof v === 'object') {
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, resolveEventTemplate(x, env)]))
+  }
+  return v
+}
+
+async function eventTriggeredRulesTick(event: EventEnvelope): Promise<void> {
+  if (event.source === 'eec.scheduler-bridge') return // sin bucles: reglas no disparan reglas
+  let rules: Array<{ id: string; name: string; expression: string; commandType: string; commandPayloadJson: string }>
+  try {
+    rules = await db.schedule.findMany({ where: { enabled: true, kind: 'EVENT_TRIGGERED' } })
+  } catch { return }
+  for (const s of rules) {
+    if (!eventPatternMatches(s.expression.trim(), event.event_type)) continue
+    let base: Record<string, unknown> = {}
+    try { base = JSON.parse(s.commandPayloadJson || '{}') as Record<string, unknown> } catch { base = {} }
+    const payload = resolveEventTemplate(base, { event })
+    await withTrace(newTrace({ sim: event.sim ?? false, correlationId: event.correlation_id ?? undefined }), async () => {
+      await eventBus.publish({
+        event_type: 'system.schedule.fired', source: 'eec.scheduler-bridge', subject: `schedule:${s.id}`,
+        payload: { scheduleId: s.id, name: s.name, commandType: s.commandType, trigger: event.event_type },
+        causation_id: event.event_id,
+      })
+      await dispatchCommand({
+        type: s.commandType,
+        payload: (payload ?? {}) as Record<string, unknown>,
+        requesterType: 'SYSTEM', requesterId: 'eec:scheduler-bridge',
+        idempotencyKey: `sched-ev:${s.id}:${event.event_id}`,
+      })
+    })
+    await db.schedule.update({ where: { id: s.id }, data: { lastRunAt: new Date() } }).catch(() => undefined)
+  }
+}
+
+function subscribeEventTriggeredRules(): void {
+  const g = globalForWorkers as unknown as { __eecSchedBridge?: boolean }
+  if (g.__eecSchedBridge) return
+  g.__eecSchedBridge = true
+  eventBus.subscribe('*', eventTriggeredRulesTick)
+}
+
 // ---------------- APPROVAL EXPIRY (§24) ----------------
 async function approvalExpiryTick(): Promise<void> {
   const expired = await db.approval.findMany({
@@ -340,6 +463,9 @@ function subscribeNotificationRouter(): void {
     'handoff.created': { severity: 'INFO', title: p => `Traspaso recibido: ${String(p.subject ?? p.handoffId)}` },
     'handoff.acknowledged': { severity: 'INFO', title: p => `Traspaso confirmado: ${String(p.subject ?? p.handoffId)}` },
     'handoff.rejected': { severity: 'WARNING', title: p => `Traspaso rechazado: ${String(p.subject ?? p.handoffId)}` },
+    'task.deadline_near': { severity: 'WARNING', title: p => `Plazo cerca: ${String(p.title ?? p.taskId)} (${String(p.minutesLeft)} min)` },
+    'task.overdue': { severity: 'ERROR', title: p => `PLAZO VENCIDO: ${String(p.title ?? p.taskId)}` },
+    'approval.deadline_near': { severity: 'WARNING', title: p => `Aprobación por expirar: ${String(p.title ?? p.approvalId)}` },
   }
 
   eventBus.subscribe('*', async (event) => {
@@ -397,6 +523,7 @@ export function startWorkers(): void {
   every(10_000, 'heartbeat-monitor', heartbeatMonitorTick)
   every(5000, 'scheduler', schedulerTick)
   every(30_000, 'approval-expiry', approvalExpiryTick)
+  every(30_000, 'sla-monitor', slaMonitorTick)
   every(60_000, 'metrics-flush', async () => {
     const [agents, running, tasks, approvals] = await Promise.all([
       db.agent.count(), db.run.count({ where: { status: 'RUNNING' } }),
@@ -409,6 +536,7 @@ export function startWorkers(): void {
     await recordMetric('eec.gauge.approvals_pending', approvals)
   })
   subscribeNotificationRouter()
+  subscribeEventTriggeredRules()
   globalForWorkers.__eecWorkers = handles
   console.log(`[EEC] workers iniciados: ${handles.map(h => h.name).join(', ')}`)
 }
@@ -423,4 +551,5 @@ export async function runTicksOnce(): Promise<void> {
   await runtimeLoopTick()
   await schedulerTick()
   await approvalExpiryTick()
+  await slaMonitorTick()
 }
