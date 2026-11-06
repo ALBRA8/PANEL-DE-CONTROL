@@ -65,3 +65,9 @@ EEC_SIMULATION_MODE=1|0        # default ON (honestidad: nada externo sin pedirl
 
 - No hay proveedor de identidad federado (SSO/OIDC) ni multi-usuario con roles granulares: la frontera actual es de **operador único** + token de servicio. Queda preparada para sustituir `loginOperator` por un IdP sin tocar el pipeline (la identidad sigue entrando por `resolveRequester`).
 - El rate-limit en memoria es por proceso; documentado como limitación, no como característica.
+
+## Apéndice V2 — Cadena hash de auditoría, quórum y órgano de control (doc 07 · sprint P0-P2)
+- **AuditChain (P0-1)**: cada `AuditRecord` se sella al crearlo con SHA-256 del payload canónico encadenado al sello previo (`chainSeq`, `prevHash`, `thisHash`; génesis = 64 ceros). Un único punto de creación (`writeAudit`) — nada entra a la escritura pública sin sello. Verificación incremental: `GET /api/eec/audit/chain`. La cadena prueba alteración posterior; no prueba verdad absoluta (mitigación futura: fingerprint externo periódico).
+- **Quórum humano (P0-3)**: `minimumHumanSignoff` en `Approval` — N firmas HUMANAS DISTINTAS; duplicados rechazados; el comando no se reanuda sin quórum. Riesgo conocido: exige identidad real de usuarios (quórum 1 sigue siendo seguro hoy).
+- **Órgano de control (P1-3)**: revisión adversarial pre-dispatch determinística — 7 reglas (inyección, salto de controles, suplantación, urgencia artificial, evidencia fantasma, destrucción sin motivo, destructiva explícita), score 0-100 y umbrales por política `ADVERSARIAL`; BLOCK rechaza, REVIEW fuerza quórum.
+- **Delegación administrativa (P2-4)**: feature flags por organización con catálogo cerrado y override auditable (`org.flag.set/unset` sellados en la cadena); fail-closed ante flag desconocido o tipo incorrecto.

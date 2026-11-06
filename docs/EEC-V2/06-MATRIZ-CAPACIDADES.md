@@ -72,3 +72,18 @@
 - `src/lib/eec-client.ts` + `src/components/eec/shell.tsx` + `agent-inspector.tsx` — 401→login, sección de observabilidad
 - `package.json` — scripts `test`, `test:acceptance`, `test:v2`, `test:api-security`, `pilot`
 - `.env.example`, `README.md`
+
+## Apéndice V2 — Estado de implementación del sprint doc 07 (P0-P3)
+| Ítem (matriz doc 07) | Estado | Evidencia |
+|---|---|---|
+| P0-1 Cadena hash en `AuditRecord` | ✅ | `engine/audit-chain.ts` + `/api/eec/audit/chain` |
+| P0-2 Evidence Gate fail-closed | ✅ | `security/evidence.ts` + gate en pipeline |
+| P0-3 Quórum humano `minimumHumanSignoff` | ✅ | `signaturesJson` en `Approval` |
+| P1-1 `HandoffEnvelope` | ✅ | modelo `Handoff` + `handoff.create/ack/reject` |
+| P1-2 Motor SLA + triggers por evento | ✅ | worker `sla-monitor` + reglas `EVENT_TRIGGERED` |
+| P1-3 Revisión adversarial pre-dispatch | ✅ | `security/adversarial.ts` (7 reglas, score) |
+| P2-1 Eval harness con rúbricas | ✅ | `eval/rubrics.ts` + `eval.run` auditado |
+| P2-2 Doctor del sistema | ✅ | `engine/doctor.ts` + `/api/eec/doctor` + panel Sistema |
+| P2-3 Provenance de evidencia | ✅ | criterio estricto + `attestEvidence`/`provenanceStatus` |
+| P2-4 Paquete administrativo (flags + usage por org) | ✅ | `engine/org-flags.ts` + `org.*` + `/api/eec/orgs` + panel |
+| P3 (post-piloto): MCP runtime, marketplace | ⏳ | diseño esbozado en doc 07 §4 |

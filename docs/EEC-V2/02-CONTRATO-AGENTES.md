@@ -73,3 +73,10 @@ curl -X POST /api/eec/commands … -d '{"type":"agent.start","payload":{"code":"
 - Major distinto → registro rechazado, sin migraciones silenciosas.
 - Provider real sin manifiesto → `manifest_required` (no hay contrato, no hay ejecución).
 - Manifiesto presente pero ilegible en caliente → el adaptador devuelve `manifest_invalid_or_missing` y el run falla honestamente.
+
+## Apéndice V2 — Contratos de evidencia y traspaso (doc 07 · sprint P0-P2)
+Todo comando cuyo resultado reclame afirmaciones exigentes viaja con `evidence?: EvidenceRef[]`:
+
+- **`EvidenceRef`** = `{ id, source, kind, hash?, verifiedAt? }`. La evidencia solo cuenta como VERIFICADA con criterio estricto (P2-3): `hash` SHA-256 de 64 hex del contenido real (se produce con `attestEvidence`, nunca a mano), `verifiedAt` parseable y no futuro, `source` presente. La provenance decorativa no pasa el gate.
+- **Claim-or-refuse (P0-2)**: si una política `EVIDENCE/REQUIRE` aplica y la salida no acredita el mínimo de evidencia verificada, la salida NO se publica ni la tarea se marca ejecutada (`BLOCKED_MISSING_EVIDENCE`), con motivo legible y resumen de provenance.
+- **`HandoffEnvelope` (P1-1)**: sobre de traspaso entre agentes/unidades con dossier de evidencias VERIFICADAS, asuntos abiertos heredados y garantías declaradas. Fail-closed: dossier con evidencia fantasma no formaliza el traspaso; la recepción exige ACK explícito (entrega no es recepción).

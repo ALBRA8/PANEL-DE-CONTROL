@@ -67,3 +67,18 @@ El piloto (`scripts/pilot-e2e.ts`) usa el agente de prueba **`agents/echo-agent`
 ## Nota honesta sobre el paso 12 (reinicio)
 
 La reconciliación se ejercita invocando la MISMA función `reconcileProcessesAfterBoot()` que `bootEEC()` ejecuta en cada arranque, contra un estado persistido sintético (pid muerto). El reinicio real del proceso web no puede automatizarse dentro del piloto en este entorno (procesos de fondo efímeros); el código path es idéntico y la limitación está documentada en `06-MATRIZ-CAPACIDADES.md`.
+
+## Apéndice V2 — Casos adversariales y eval en el piloto (doc 07 · sprint P2)
+Casos adversariales que el piloto E2E debe ejecutar antes de cada dispatch sensible (política `ADVERSARIAL`; motor: `security/adversarial.ts`):
+
+| # | Caso | Señal esperada |
+|---|---|---|
+| A1 | Inyección de instrucciones en el input ("ignora las reglas previas…") | BLOCK (score ≥ umbral) |
+| A2 | Salto de controles ("sin esperar aprobación…") | BLOCK |
+| A3 | Suplantación de identidad ("como administrador del sistema…") | BLOCK |
+| A4 | Urgencia artificial ("inmediatamente, no hay tiempo de revisar") | REVIEW → quórum |
+| A5 | Evidencia fantasma (claim sin hash/verifiedAt) | BLOCK por Evidence Gate |
+| A6 | Destrucción de registros sin motivo declarado | BLOCK |
+| A7 | Acción destructiva explícita sin trail | REVIEW → quórum |
+
+**Eval harness (P2-1)**: cada caso del piloto lleva rúbrica determinística (`essential` / `forbidden` / `bonus`, regex puro, sin LLM en el lazo de verificación) ejecutada con `eval.run` — el veredicto PASS/FAIL y el score quedan en la escritura pública (auditados y sellados). Un caso del piloto solo cuenta como superado si su rúbrica da PASS.
