@@ -52,6 +52,19 @@ export const COMMAND_SCHEMAS: Record<string, z.ZodTypeAny> = {
   'agent.wake': z.object({ agentId: id }),
   'agent.assign_office': z.object({ agentId: id, officeCode: z.string() }),
 
+  // ---- eval harness (P2-1 · matriz #13) ----
+  'eval.run': z.object({
+    label: z.string().min(2).max(80).optional(),
+    rubric: z.object({
+      name: z.string().min(2).max(80),
+      description: z.string().optional(),
+      essential: z.array(z.object({ id: z.string().min(1), description: z.string().min(1), pattern: z.string().min(1) })).default([]),
+      forbidden: z.array(z.object({ id: z.string().min(1), description: z.string().min(1), pattern: z.string().min(1) })).default([]),
+      bonus: z.array(z.object({ id: z.string().min(1), description: z.string().min(1), pattern: z.string().min(1), points: z.number().positive() })).default([]),
+    }),
+    output: z.object({ text: z.string().max(200_000) }),
+  }),
+
   // ---- tareas ----
   'task.create': z.object({
     title: z.string().min(3),

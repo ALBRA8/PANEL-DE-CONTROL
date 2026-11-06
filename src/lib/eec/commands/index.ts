@@ -9,6 +9,7 @@ import { registerCollabHandlers } from './handlers/collab-handlers'
 import { registerBizHandlers } from './handlers/biz-handlers'
 import { registerHandoffHandlers } from './handlers/handoff-handlers'
 import { registerOrgAdminHandlers } from './handlers/org-admin-handlers'
+import { registerEvalHandlers } from './handlers/eval-handlers'
 
 const globalForReg = globalThis as unknown as { __eecHandlersRegistered?: boolean }
 
@@ -21,6 +22,7 @@ export function ensureHandlersRegistered(): void {
   registerBizHandlers()
   registerHandoffHandlers()
   registerOrgAdminHandlers()
+  registerEvalHandlers()
   globalForReg.__eecHandlersRegistered = true
 }
 
