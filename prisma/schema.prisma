@@ -28,6 +28,7 @@ model Organization {
   updatedAt  DateTime     @updatedAt
   departments Department[]
   projects   Project[]
+  flags      OrgFlag[]
 }
 
 model Department {
@@ -360,6 +361,20 @@ model ToolInvocation {
   sim           Boolean   @default(false)
   createdAt     DateTime  @default(now())
   completedAt   DateTime?
+}
+
+model OrgFlag {
+  id        String       @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id])
+  key       String
+  valueJson String       @default("null")
+  reason    String?
+  setBy     String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([orgId, key])
 }
 
 // ============ PERMISOS / POLÍTICAS ============

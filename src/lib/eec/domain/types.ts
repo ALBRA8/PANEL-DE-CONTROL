@@ -194,6 +194,7 @@ export const COMMAND_RISK: Record<string, RiskLevel> = {
   'memory.write': 'LOW', 'knowledge.publish': 'MEDIUM', 'tool.invoke': 'MEDIUM',
   'notification.read': 'LOW', 'audit.correct': 'HIGH',
   'handoff.create': 'MEDIUM', 'handoff.ack': 'LOW', 'handoff.reject': 'LOW',
+  'org.create': 'MEDIUM', 'org.flag.set': 'LOW', 'org.flag.unset': 'LOW',
   'system.simulation.toggle': 'HIGH', 'system.chaos.runtime_crash': 'HIGH',
   'system.deadletter.retry': 'MEDIUM',
 }

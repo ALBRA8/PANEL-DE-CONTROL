@@ -180,10 +180,10 @@ El gate del gemelo niega afirmaciones legales sin cita oficial. Generalización 
 | P1-1 `HandoffEnvelope` (#24) | ✅ implementado | contrato en `domain/contracts.ts` + modelo `Handoff` + comandos `handoff.create/ack/reject` con dossier fail-closed y ACK del receptor; commit `3206028`; tests `p1-handoff.test.ts` |
 | P1-2 motor SLA (#17) | ✅ implementado | worker `sla-monitor` (escalera WARNING→CRITICAL→OVERDUE con dedup persistente) + reglas `EVENT_TRIGGERED` en `Schedule` con plantillas `{{event.*}}` (on(deadline_near) crea tarea de escalamiento auditable); commit `c6b38c4`; tests `p1-sla.test.ts` |
 | P1-3 revisión adversarial (#11) | ✅ implementado | `security/adversarial.ts` — 7 reglas determinísticas (inyección, salto de controles, suplantación, urgencia artificial, evidencia fantasma, destrucción sin motivo, destructiva explícita), score 0-100, umbrales por política `ADVERSARIAL`; BLOCK rechaza, REVIEW fuerza quórum humano en agentes; commit `28a8600`; tests `p1-adversarial.test.ts` |
+| P2-4 paquete administrativo (#21+#22) | ✅ implementado | `engine/org-flags.ts` (catálogo cerrado de 7 flags, override fail-closed) + `usage/coste por org` (atribución ToolInvocation→Task→Project→Organization, CENTRAL para lo no atribuido) + comandos `org.create/org.flag.set/org.flag.unset` (auditados y sellados en la cadena) + `/api/eec/orgs` + panel en Sistema + alta de segunda organización (`scripts/eec-org2-seed.ts`); tests `p2-admin.test.ts` |
 
 Regresión completa P0+P1: **32/32 tests en verde** (`bun test tests/eec-v2/`). Pendiente para el
-siguiente tramo: P2-1 eval harness con rúbricas, P2-2 doctor del sistema, P2-3 provenance de
-evidencia y **P2-4 paquete administrativo** (feature flags por org + usage/coste por org).
+siguiente tramo: P2-1 eval harness con rúbricas, P2-2 doctor del sistema, P2-3 provenance de evidencia. **P2-4 paquete administrativo: ✅ implementado** (ver tabla).
 
 Enmiendas mínimas a documentos existentes: `02-CONTRATO-AGENTES.md` (añadir `EvidenceRef` + handoff), `04-SEGURIDAD.md` (AuditChain + quórum), `05-PILOTO-E2E.md` (casos adversariales), `06-MATRIZ-CAPACIDADES.md` (estado de los ítems P0-P3).
 

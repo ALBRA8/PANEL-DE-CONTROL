@@ -8,6 +8,26 @@ import { z } from 'zod'
 const id = z.string().min(1)
 
 export const COMMAND_SCHEMAS: Record<string, z.ZodTypeAny> = {
+  // ---- administración por organización (P2-4 · matriz #21/#22) ----
+  'org.create': z.object({
+    code: z.string().min(2).max(40),
+    name: z.string().min(2),
+    mission: z.string().optional(),
+    /** flags iniciales del alta (validados contra catálogo cerrado en el handler). */
+    flags: z.record(z.string(), z.unknown()).default({}),
+  }),
+  'org.flag.set': z.object({
+    orgId: id.optional(), orgCode: z.string().optional(),
+    key: z.string().min(1),
+    value: z.unknown(),
+    reason: z.string().max(300).optional(),
+  }).refine(a => a.orgId || a.orgCode, 'orgId o orgCode requerido'),
+  'org.flag.unset': z.object({
+    orgId: id.optional(), orgCode: z.string().optional(),
+    key: z.string().min(1),
+    reason: z.string().max(300).optional(),
+  }).refine(a => a.orgId || a.orgCode, 'orgId o orgCode requerido'),
+
   // ---- agentes ----
   'agent.register': z.object({
     code: z.string().min(2).max(40),
