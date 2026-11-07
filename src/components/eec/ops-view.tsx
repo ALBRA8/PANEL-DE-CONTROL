@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { OrgAdminPanel } from '@/components/eec/org-admin-panel'
+import { ObservatoryPanel } from '@/components/eec/observatory-panel'
 import { DoctorPanel } from '@/components/eec/doctor-panel'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -265,6 +266,7 @@ export default function OpsView() {
 
   return (
     <div className="flex flex-col gap-4" aria-label="Operación del sistema">
+      <ObservatoryPanel />
       <OrgAdminPanel />
       <DoctorPanel />
       <header className="flex flex-wrap items-center justify-between gap-3">
