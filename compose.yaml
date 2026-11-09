@@ -1,0 +1,36 @@
+services:
+  panel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: albra/panel-de-control:local
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${PANEL_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: file:/app/data/panel.db
+      EEC_OPERATOR_PASSWORD: ${EEC_OPERATOR_PASSWORD:?Define EEC_OPERATOR_PASSWORD en .env}
+      EEC_SESSION_SECRET: ${EEC_SESSION_SECRET:?Define EEC_SESSION_SECRET en .env}
+      EEC_API_TOKEN: ${EEC_API_TOKEN:?Define EEC_API_TOKEN en .env}
+      EEC_SIMULATION_MODE: ${EEC_SIMULATION_MODE:-1}
+      EEC_INSTALLADOR_URL: ${EEC_INSTALLADOR_URL:-}
+      EEC_INSTALLADOR_TOKEN: ${EEC_INSTALLADOR_TOKEN:-}
+    volumes:
+      - panel-data:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+volumes:
+  panel-data:
