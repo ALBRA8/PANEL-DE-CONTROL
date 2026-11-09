@@ -244,3 +244,29 @@ Repetir las pruebas en un computador local y en un VPS Linux limpio.
 **El INSTALADOR despliega y verifica. El PANEL gobierna y coordina. Los agentes ejecutan.**
 
 Este documento describe el objetivo y los contratos propuestos. Los puntos identificados como pendientes no deben presentarse como capacidades ya implementadas.
+
+
+## 15. Avance de empaquetado (2026-11-09)
+
+Se añadió una primera base de despliegue Docker en el repositorio del PANEL:
+
+- `Dockerfile`: build Next.js standalone con Bun y runtime persistente.
+- `compose.yaml`: servicio del PANEL, volumen SQLite persistente y health check.
+- `deploy/docker-entrypoint.sh`: valida secretos obligatorios, aplica el esquema Prisma y arranca el servidor.
+- `src/app/api/health/route.ts`: endpoint de salud que comprueba conectividad real con SQLite.
+- `deploy/README.md`: instrucciones iniciales de despliegue y operación.
+- `.dockerignore`: excluye base de datos local, secretos, dependencias y artefactos del contexto Docker.
+
+**Alcance real:** esto es un primer artefacto de empaquetado para Docker/Linux. Los archivos están publicados, pero todavía no se ha ejecutado un build de imagen ni una prueba de arranque en un VPS. No debe considerarse certificado para producción.
+
+**Bloqueadores que siguen abiertos:**
+
+1. Validar build y arranque real del contenedor, incluyendo Prisma y persistencia SQLite.
+2. Incorporar el bridge Socket.IO y decidir si Caddy se incluye en el paquete de despliegue.
+3. Definir backup/restore y estrategia de actualización segura de la base de datos.
+4. Crear el paquete firmado del PANEL y su manifiesto ALBRA.
+5. Incorporar `panel-de-control` al catálogo del INSTALADOR con un adaptador de despliegue compatible. El contrato del INSTALADOR contempla `selfhosted-vps`, pero los productos CRM/LEADS revisados siguen declarando `local` y `windows-local`; no se debe asumir que el adaptador VPS ya está listo para este producto.
+6. Completar el bootstrap de credenciales y la compatibilidad entre el adaptador lifecycle del PANEL y las rutas EEC del INSTALADOR.
+7. Probar el flujo completo en computador local y VPS Linux.
+
+La siguiente entrega técnica debe ser el paquete ALBRA verificable y la integración de catálogo; no se habilita la instalación automática desde el PANEL hasta superar las pruebas anteriores.
