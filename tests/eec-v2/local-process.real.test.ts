@@ -10,6 +10,14 @@ import { setSimulationMode } from '../../src/lib/eec/commands'
 import manifestJson from '../../agents/echo-agent/manifest.json'
 import { LocalProcessAgentAdapter, cancelRunProcesses } from '../../src/lib/eec/providers/adapters/local-process'
 
+
+// Entorno autocontenido: permite el fixture y el workdir del repo.
+import path from 'node:path'
+const REPO_ROOT = path.resolve(import.meta.dir, '..', '..')
+const ECHO_DIR = path.resolve(import.meta.dir, '..', '..', 'agents', 'echo-agent')
+process.env.EEC_ALLOWED_EXECUTABLES = [process.env.EEC_ALLOWED_EXECUTABLES, process.execPath].filter(Boolean).join(',')
+process.env.EEC_ALLOWED_WORKDIRS = [process.env.EEC_ALLOWED_WORKDIRS, REPO_ROOT, ECHO_DIR].filter(Boolean).join(',')
+
 const SFX = Date.now().toString(36)
 const adapter = new LocalProcessAgentAdapter()
 let agentId = ''
@@ -79,7 +87,7 @@ describe('V2 proceso real (integración)', () => {
     const runId = `TST-run-timeout-${SFX}`
     await adapter.tick(mkCtx(runId, { durationMs: 30000, chunks: 30 }))
     // el manifiesto del test tiene timeoutMs=8000 — simulamos espera corta forzando ticks
-    let last = { done: false, progress: 0 } as Awaited<ReturnType<adapter.tick>>
+    let last = { done: false, progress: 0 } as Awaited<ReturnType<typeof adapter.tick>>
     for (let i = 0; i < 40 && !last.done; i++) {
       await new Promise(r => setTimeout(r, 250))
       last = await adapter.tick({ ...mkCtx(runId, {}), progress: last.progress })
@@ -105,7 +113,7 @@ describe('V2 proceso real (integración)', () => {
   test('crash sin result line → error no_result_line (resultado ambiguo honesto)', async () => {
     const runId = `TST-run-crash-${SFX}`
     await adapter.tick(mkCtx(runId, { durationMs: 400, chunks: 2, crashBeforeResult: true }))
-    let last = { done: false, progress: 0 } as Awaited<ReturnType<adapter.tick>>
+    let last = { done: false, progress: 0 } as Awaited<ReturnType<typeof adapter.tick>>
     for (let i = 0; i < 40 && !last.done; i++) {
       await new Promise(r => setTimeout(r, 250))
       last = await adapter.tick({ ...mkCtx(runId, {}), progress: last.progress })
@@ -117,7 +125,7 @@ describe('V2 proceso real (integración)', () => {
   test('exit≠0 → agent_failed con código real', async () => {
     const runId = `TST-run-fail-${SFX}`
     await adapter.tick(mkCtx(runId, { durationMs: 400, chunks: 2, exitCode: 3 }))
-    let last = { done: false, progress: 0 } as Awaited<ReturnType<adapter.tick>>
+    let last = { done: false, progress: 0 } as Awaited<ReturnType<typeof adapter.tick>>
     for (let i = 0; i < 40 && !last.done; i++) {
       await new Promise(r => setTimeout(r, 250))
       last = await adapter.tick({ ...mkCtx(runId, {}), progress: last.progress })

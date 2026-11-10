@@ -89,15 +89,15 @@ export const AgentManifestSchema = z.object({
   platform: z.object({
     os: z.enum(['linux', 'darwin', 'windows', 'any']).default('linux'),
     requirements: z.array(z.string().max(120)).max(20).default([]),
-  }).default({}),
+  }).default({ os: 'any', requirements: [] }),
   runtime: z.discriminatedUnion('type', [RuntimeLocalProcess, RuntimeHttpService]),
   capabilities: z.array(Capability).min(1).max(50),
   config: z.array(ConfigEntry).max(30).default([]),
-  limits: Limits.default({}),
+  limits: Limits.default({ timeoutMs: 120_000, maxRetries: 0, idempotent: false }),
   /** kind de health check implícito en runtime; observaciones extra opcionales. */
   health: z.object({
     intervalMs: z.number().int().min(5_000).max(3_600_000).default(60_000),
-  }).default({}),
+  }).default({ intervalMs: 60_000 }),
 })
 
 export type AgentManifest = z.infer<typeof AgentManifestSchema>

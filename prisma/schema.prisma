@@ -775,3 +775,28 @@ model ExecutionProcess {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 }
+
+// ══════════════════════════════════════════════════════════════
+// ALBRA BRIDGE — operaciones delegadas al INSTALADOR (contrato EEC)
+// El PANEL NUNCA ejecuta Docker: solicita operaciones al INSTALADOR
+// vía POST /api/ops (Bearer + requestId + nonce + expiración) y
+// registra aquí cada solicitud y su resultado REAL.
+// ══════════════════════════════════════════════════════════════
+model ManagedOperation {
+  id          String    @id @default(cuid())
+  requestId   String    @unique
+  productId   String
+  operation   String // INSTALL | START | STOP | RESTART | HEALTH | UPDATE | ROLLBACK | BACKUP | RESTORE | UNINSTALL | DIAGNOSTICS | STATUS
+  accepted    Boolean   @default(false)
+  runId       String?
+  contractVersion String @default("1.0.0")
+  resultCode  String?
+  resultJson  Json?
+  errorJson   Json?
+  paramsJson  Json?
+  durationMs  Int?
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+
+  @@index([productId, createdAt])
+}

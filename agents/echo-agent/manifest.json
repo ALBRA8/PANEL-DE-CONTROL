@@ -13,18 +13,35 @@
   },
   "platform": {
     "os": "linux",
-    "requirements": ["bun >= 1.0 (o node >= 18)"]
+    "requirements": [
+      "bun >= 1.0 (o node >= 18)"
+    ]
   },
   "runtime": {
     "type": "LOCAL_PROCESS",
     "executable": "bun",
-    "args": ["agents/echo-agent/agent.mjs"],
-    "workdir": "/home/z/my-project",
-    "healthArgs": ["agents/echo-agent/agent.mjs", "--eec-health"]
+    "args": [
+      "agents/echo-agent/agent.mjs"
+    ],
+    "workdir": ".",
+    "healthArgs": [
+      "agents/echo-agent/agent.mjs",
+      "--eec-health"
+    ]
   },
   "capabilities": [
-    { "op": "echo.work", "description": "Trabajo determinista con progreso y resultado estructurado", "risk": "LOW", "requiresApproval": false },
-    { "op": "echo.heavy", "description": "Trabajo prolongado (demostración de cancelación y timeout)", "risk": "MEDIUM", "requiresApproval": false }
+    {
+      "op": "echo.work",
+      "description": "Trabajo determinista con progreso y resultado estructurado",
+      "risk": "LOW",
+      "requiresApproval": false
+    },
+    {
+      "op": "echo.heavy",
+      "description": "Trabajo prolongado (demostración de cancelación y timeout)",
+      "risk": "MEDIUM",
+      "requiresApproval": false
+    }
   ],
   "config": [],
   "limits": {

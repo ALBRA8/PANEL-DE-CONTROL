@@ -507,6 +507,7 @@ function EmptyNote({ children }: { children: React.ReactNode }) {
 
 function AgentDetailContent({ detail }: { detail: AgentDetail }) {
   const a = detail.agent
+  const obs = detail.observability
   const capabilities = parseJsonStrings(a.capabilitiesJson)
   const runs = a.runs.slice(0, 10)
   const memories = a.memories.slice(0, 15)

@@ -92,7 +92,7 @@ export function registerTaskHandlers(): void {
     const context = await buildContextPackage({ agentId: agent.id, taskId: task.id })
     // EEC V2: entrada estructurada de la tarea (viaja al agente por STDIN, jamás por shell/argv)
     const taskInput = input ?? {}
-    ;(context as Record<string, unknown>).taskInput = taskInput
+    ;(context as unknown as Record<string, unknown>).taskInput = taskInput
 
     const session = await db.session.findFirst({
       where: { agentId: agent.id, status: 'ACTIVE' }, orderBy: { createdAt: 'desc' },

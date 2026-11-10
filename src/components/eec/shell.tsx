@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import {
   LayoutDashboard,
   Bot,
+  Package2,
   KanbanSquare,
   GitBranch,
   Stamp,
@@ -98,6 +99,9 @@ const EventsAuditView = dynamic(() => import('@/components/eec/events-audit-view
   ssr: false,
   loading: () => <ViewSkeleton />,
 })
+const AgentsAlbraView = dynamic(() => import('@/components/eec/agents-albra-view'), {
+  loading: () => <ViewSkeleton />,
+})
 const OpsView = dynamic(() => import('@/components/eec/ops-view'), {
   ssr: false,
   loading: () => <ViewSkeleton />,
@@ -114,6 +118,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { view: 'central', label: 'Central', icon: LayoutDashboard },
   { view: 'agents', label: 'Agentes', icon: Bot },
+  { view: 'agents-albra', label: 'Agentes ALBRA', icon: Package2 },
   { view: 'board', label: 'Tareas', icon: KanbanSquare },
   { view: 'workflows', label: 'Workflows', icon: GitBranch },
   { view: 'approvals', label: 'Aprobaciones', icon: Stamp },
@@ -483,6 +488,8 @@ function renderView(view: EecView) {
       return <EventsAuditView />
     case 'ops':
       return <OpsView />
+    case 'agents-albra':
+      return <AgentsAlbraView />
     default:
       return <CentralScreen />
   }

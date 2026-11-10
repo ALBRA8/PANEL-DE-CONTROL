@@ -31,6 +31,33 @@ beforeAll(async () => {
   await initDbPragmas()
   await bootEEC()
   setSimulationMode(true)
+  // Datos de referencia idempotentes: los tests 06/20/27 dependen del mapa
+  // de ubicaciones y de la herramienta web.search (mismo catálogo que
+  // scripts/seed.ts, cargado aquí en modo upsert para BD frescas de test).
+  const LOCATIONS: Array<[string, string, string, number, number]> = [
+    ['HQ-RECEPTION', 'Recepción', 'HQ', 1, 0],
+    ['HQ-CONTROL', 'Control Center', 'CONTROL_CENTER', 5, 0],
+    ['HQ-BOARDROOM', 'Boardroom', 'BOARDROOM', 8, 0],
+    ['HQ-ARCHIVE', 'Archive', 'ARCHIVE', 11, 0],
+    ['HQ-LOUNGE', 'Lounge', 'LOUNGE', 1, 4],
+    ['HQ-WORLDGATE', 'World Gate', 'WORLD_GATE', 11, 4],
+    ['REV-DEPT', 'Revenue Floor', 'DEPARTMENT', 3, 2],
+    ['OPS-DEPT', 'Operations Floor', 'DEPARTMENT', 6, 2],
+    ['INTEL-DEPT', 'Intelligence Floor', 'DEPARTMENT', 9, 2],
+    ['OFF-VEGA', 'Oficina Vega', 'OFFICE', 2, 6],
+    ['OFF-LYRA', 'Oficina Lyra', 'OFFICE', 4, 6],
+    ['OFF-ORION', 'Oficina Orion', 'OFFICE', 6, 6],
+    ['OFF-NOVA', 'Oficina Nova', 'OFFICE', 8, 6],
+    ['OFF-ATLAS', 'Oficina Atlas', 'OFFICE', 10, 6],
+  ]
+  for (const [code, name, type, x, y] of LOCATIONS) {
+    await db.location.upsert({ where: { code }, create: { code, name, type, x, y, capacity: 4 }, update: {} })
+  }
+  await db.tool.upsert({
+    where: { code: 'web.search' },
+    create: { code: 'web.search', name: 'Búsqueda web', capability: 'search.web', description: 'Búsqueda web (referencia para pruebas)', risk: 'LOW' },
+    update: {},
+  })
 })
 
 afterAll(async () => {

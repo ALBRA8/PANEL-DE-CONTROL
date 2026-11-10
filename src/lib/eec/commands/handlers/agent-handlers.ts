@@ -31,7 +31,7 @@ export function registerAgentHandlers(): void {
       const v = validateManifest(p.manifest)
       if (!v.ok) {
         manifestError = v.errors.join('; ')
-      } else if (v.manifest.identity.code !== p.code) {
+      } else if (v.manifest && v.manifest.identity.code !== p.code) {
         manifestError = `manifest_identity_mismatch: manifiesto declara ${v.manifest.identity.code}, registro usa ${p.code}`
       } else {
         manifestValidated = v.manifest as unknown as Record<string, unknown>

@@ -14,7 +14,7 @@ import {
 export type EecView =
   | 'central' | 'agents' | 'board' | 'workflows' | 'approvals'
   | 'meetings' | 'calendar' | 'crm' | 'world' | 'memory'
-  | 'events' | 'ops'
+  | 'events' | 'ops' | 'agents-albra'
 
 interface EecStoreState {
   snapshot: EecSnapshot | null

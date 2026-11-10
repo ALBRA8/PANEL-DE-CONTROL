@@ -208,7 +208,8 @@ export class LocalProcessAgentAdapter implements AgentInterface {
     const manifest = parseAgentManifest(agent)
     if (!manifest) return { healthy: false, detail: 'manifest_invalid_or_missing' }
     if (manifest.runtime.type !== 'LOCAL_PROCESS') return { healthy: false, detail: 'wrong_runtime_type' }
-    const exe = resolveExecutable(manifest.runtime.executable)
+    const rt = manifest.runtime
+    const exe = resolveExecutable(rt.executable)
     if (!exe.ok) return { healthy: false, detail: exe.error }
     const wd = validateWorkdir(manifest.runtime.workdir)
     if (!wd.ok) return { healthy: false, detail: wd.error }
@@ -216,7 +217,7 @@ export class LocalProcessAgentAdapter implements AgentInterface {
       let settled = false
       const done = (healthy: boolean, detail?: string) => { if (!settled) { settled = true; resolve({ healthy, detail }) } }
       try {
-        const child = spawn(exe.path, manifest.runtime.healthArgs, {
+        const child = spawn(exe.path, rt.healthArgs, {
           cwd: wd.path,
           env: childEnv(manifest),
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -385,6 +386,7 @@ function childEnv(manifest: AgentManifest): NodeJS.ProcessEnv {
     HOME: process.env.HOME ?? '/tmp',
     LANG: 'C.UTF-8',
     EEC_CHILD: '1',
+    NODE_ENV: process.env.NODE_ENV ?? 'production',
   }
   for (const c of manifest.config) {
     if (c.secretRef && process.env[c.secretRef] !== undefined) {

@@ -50,7 +50,7 @@ describe('P0-1 cadena hash de auditoría', () => {
     for (const r of recs) {
       expect(r.thisHash).toMatch(/^[0-9a-f]{64}$/)
       // el hash es recalculable desde el contenido público (verificabilidad externa)
-      expect(hashSealPayload(r as never, r.prevHash)).toBe(r.thisHash)
+      expect(hashSealPayload(r as never, r.prevHash)).toBe(r.thisHash as string)
     }
     const v1 = await verifyAuditChain(fromSeq)
     expect(v1.ok).toBe(true)

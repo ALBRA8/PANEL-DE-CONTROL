@@ -14,6 +14,13 @@ import { checkRate } from '../../src/lib/eec/security/rate-limit'
 import { UnavailableInstaladorAdapter } from '../../src/lib/eec/providers/adapters/instalador'
 import { canRunTransition } from '../../src/lib/eec/domain/types'
 
+
+// Entorno autocontenido: el allowlist debe declararse en el propio test
+// (los tests de origin dependían del entorno de la máquina del autor).
+import path from 'node:path'
+const REPO_ROOT = path.resolve(import.meta.dir, '..', '..')
+process.env.EEC_ALLOWED_WORKDIRS = [process.env.EEC_ALLOWED_WORKDIRS, REPO_ROOT].filter(Boolean).join(',')
+
 const SFX = Date.now().toString(36)
 
 // ---------- contrato (§3) ----------
@@ -79,7 +86,8 @@ describe('V2 allowlists de proceso local', () => {
   })
 
   test('workdir dentro del allowlist → ok', () => {
-    const r = validateWorkdir('/home/z/my-project/agents')
+    // Ruta portátil: dentro de la raíz del repo (declarada en el allowlist del propio test).
+    const r = validateWorkdir(path.join(REPO_ROOT, 'agents'))
     expect(r.ok).toBe(true)
   })
 
