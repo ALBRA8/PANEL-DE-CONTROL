@@ -69,3 +69,10 @@ nohup.out
 db/custom.db
 db/custom.db-wal
 db/custom.db-shm
+
+# BD locales del PANEL (SQLite)
+/db/*.db
+/db/*.db-journal
+/db/*.db-shm
+/db/*.db-wal
+/db/recover-work/
