@@ -2,22 +2,16 @@
 // ALBRA BRIDGE — cliente servidor del contrato de operaciones
 // del INSTALADOR (POST /api/ops).
 //
-// Contrato (INSTALADOR src/lib/albra/contracts/eec.ts):
-//   { contractVersion: "1.0.0", requestId, operation, productId,
-//     params?, nonce, issuedAt, expiresAt }  + Authorization: Bearer
-//
-// Reglas:
-//   - El PANEL NUNCA ejecuta Docker ni simula estados: cada
-//     operación la confirma el INSTALADOR (accepted/error real).
-//   - Nonce único por solicitud (crypto.randomUUID), expiración ≤ 5 min.
-//   - Sin token configurado → error explícito (nunca datos falsos).
+// La respuesta canónica V1 siempre anida los datos bajo result:
+// { contractVersion, requestId, accepted, operation, productId,
+//   result?: { runId?, state?, health?, detail? }, error? }
 // ============================================================
 import { randomUUID } from "node:crypto"
 
 export const ALBRA_OPS_CONTRACT_VERSION = "1.0.0"
 
 export function albraOpsUrl(): string {
-  return (process.env.ALBRA_OPS_URL ?? "http://127.0.0.1:3000").replace(/\/+$/, "")
+  return (process.env.ALBRA_OPS_URL ?? "http://127.0.0.1:3000").replace(/\\/+$/, "")
 }
 
 export function albraOpsToken(): string | null {
@@ -50,23 +44,26 @@ export interface EecOpsRequest {
   expiresAt: string
 }
 
-export interface EecOpsResponse {
-  contractVersion: string
-  requestId: string
-  accepted: boolean
-  operation: string
-  productId: string
+export interface EecOpsResult {
   runId?: string
   state?: Record<string, unknown>
   health?: Record<string, unknown>
-  detail?: Record<string, unknown>
+  detail?: unknown
+}
+
+export interface EecOpsResponse {
+  contractVersion: typeof ALBRA_OPS_CONTRACT_VERSION
+  requestId: string
+  accepted: boolean
+  operation: AlbraOperation
+  productId: string
+  result?: EecOpsResult
   error?: { code: string; message: string }
 }
 
-/** Construye la solicitud firmada del contrato (requestId/nonce/expiración). */
 export function buildOpsRequest(operation: AlbraOperation, productId: string, params?: Record<string, unknown>): EecOpsRequest {
   const issuedAt = new Date()
-  const expiresAt = new Date(issuedAt.getTime() + 4 * 60 * 1000) // ≤ ventana de 5 min del contrato
+  const expiresAt = new Date(issuedAt.getTime() + 4 * 60 * 1000)
   return {
     contractVersion: ALBRA_OPS_CONTRACT_VERSION,
     requestId: randomUUID(),
@@ -79,11 +76,36 @@ export function buildOpsRequest(operation: AlbraOperation, productId: string, pa
   }
 }
 
-/**
- * Ejecuta una operación REAL contra el INSTALADOR.
- * Sin token → AlbraBridgeError("BRIDGE_NOT_CONFIGURED").
- * Nunca lanza por accepted:false — devuelve la respuesta del contrato.
- */
+function validateOpsResponse(value: unknown, request: EecOpsRequest): EecOpsResponse {
+  if (!value || typeof value !== "object") {
+    throw new AlbraBridgeError("BRIDGE_INVALID_RESPONSE", "El INSTALADOR devolvió una respuesta que no es un objeto.")
+  }
+  const response = value as Record<string, unknown>
+  if (
+    response.contractVersion !== ALBRA_OPS_CONTRACT_VERSION ||
+    response.requestId !== request.requestId ||
+    response.operation !== request.operation ||
+    response.productId !== request.productId ||
+    typeof response.accepted !== "boolean"
+  ) {
+    throw new AlbraBridgeError("BRIDGE_CONTRACT_MISMATCH", "La respuesta del INSTALADOR no coincide con la solicitud EEC V1.")
+  }
+  if (response.result !== undefined && (!response.result || typeof response.result !== "object" || Array.isArray(response.result))) {
+    throw new AlbraBridgeError("BRIDGE_INVALID_RESPONSE", "El campo result del INSTALADOR tiene un formato inválido.")
+  }
+  if (response.error !== undefined) {
+    const error = response.error as Record<string, unknown>
+    if (!error || typeof error.code !== "string" || typeof error.message !== "string") {
+      throw new AlbraBridgeError("BRIDGE_INVALID_RESPONSE", "El campo error del INSTALADOR tiene un formato inválido.")
+    }
+  }
+  if (response.accepted === false && response.error === undefined) {
+    throw new AlbraBridgeError("BRIDGE_INVALID_RESPONSE", "Una operación rechazada debe incluir error.code y error.message.")
+  }
+  return response as unknown as EecOpsResponse
+}
+
+/** Ejecuta una operación real. accepted:false se devuelve como resultado de negocio. */
 export async function executeAlbraOp(
   operation: AlbraOperation,
   productId: string,
@@ -111,15 +133,21 @@ export async function executeAlbraOp(
     if (res.status === 401) {
       throw new AlbraBridgeError("BRIDGE_UNAUTHORIZED", "El INSTALADOR rechazó el token de operaciones (401).", 502)
     }
-    const json = (await res.json()) as EecOpsResponse
-    return { request, response: json, httpStatus }
+    if (!res.ok) {
+      throw new AlbraBridgeError("BRIDGE_UPSTREAM_ERROR", `El INSTALADOR respondió HTTP ${res.status}.`)
+    }
+    let json: unknown
+    try { json = await res.json() } catch {
+      throw new AlbraBridgeError("BRIDGE_INVALID_RESPONSE", "El INSTALADOR no devolvió JSON válido.")
+    }
+    return { request, response: validateOpsResponse(json, request), httpStatus }
   } catch (e) {
     if (e instanceof AlbraBridgeError) throw e
     return { request, response: null, httpStatus, transportError: (e as Error).message }
   }
 }
 
-/** Lectura directa (solo lectura) de endpoints abiertos del INSTALADOR. */
+/** Lectura directa de endpoints de solo lectura del INSTALADOR. */
 export async function fetchAlbraGet<T>(path: string): Promise<T> {
   try {
     const res = await fetch(`${albraOpsUrl()}${path}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) })
