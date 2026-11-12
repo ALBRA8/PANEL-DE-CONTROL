@@ -1,8 +1,8 @@
 // ============================================================
 // ALBRA BRIDGE — POST /api/v1/managed/agents/[productId]/[op]
 // Delega la operación al INSTALADOR vía contrato EEC (/api/ops).
-// ops permitidas: install|start|stop|restart|health|update|rollback|
-//                 backup|uninstall|diagnostics
+// ops permitidas: install|start|stop|restart|health|status|update|rollback|
+//                 backup|restore|uninstall|diagnostics
 // REGISTRA el resultado REAL (accepted/runId/error) en ManagedOperation.
 // La desinstalación NUNCA borra datos salvo body.confirmDataLoss=true
 // + params.purgeData=true (el INSTALADOR vuelve a exigirlo).
@@ -20,9 +20,11 @@ const OP_MAP: Record<string, AlbraOperation> = {
   stop: "STOP",
   restart: "RESTART",
   health: "HEALTH",
+  status: "STATUS",
   update: "UPDATE",
   rollback: "ROLLBACK",
   backup: "BACKUP",
+  restore: "RESTORE",
   uninstall: "UNINSTALL",
   diagnostics: "DIAGNOSTICS",
 }
@@ -51,6 +53,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ productId: str
   const params: Record<string, unknown> = {}
   if (operation === "UPDATE" && typeof body.targetVersion === "string") params.targetVersion = body.targetVersion
   if (operation === "BACKUP" && typeof body.kind === "string") params.kind = body.kind
+  if (operation === "RESTORE" && typeof body.backupId === "string") params.backupId = body.backupId
   if (operation === "UNINSTALL") {
     params.dataMode = body.dataMode === "EXPORT" ? "EXPORT" : body.dataMode === "DELETE" ? "DELETE" : "KEEP"
     // Doble confirmación: el PANEL exige confirmDataLoss=true Y el INSTALADOR exige purgeData.
