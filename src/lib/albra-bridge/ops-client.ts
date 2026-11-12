@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto"
 export const ALBRA_OPS_CONTRACT_VERSION = "1.0.0"
 
 export function albraOpsUrl(): string {
-  return (process.env.ALBRA_OPS_URL ?? "http://127.0.0.1:3000").replace(/\\/+$/, "")
+  return (process.env.ALBRA_OPS_URL ?? "http://127.0.0.1:3000").replace(/\/+$/, "")
 }
 
 export function albraOpsToken(): string | null {
@@ -92,6 +92,16 @@ export function validateOpsResponse(value: unknown, request: EecOpsRequest): Eec
   }
   if (response.result !== undefined && (!response.result || typeof response.result !== "object" || Array.isArray(response.result))) {
     throw new AlbraBridgeError("BRIDGE_INVALID_RESPONSE", "El campo result del INSTALADOR tiene un formato inválido.")
+  }
+  // V1 canónica: los datos SIEMPRE van anidados bajo result. Un campo de raíz
+  // antiguo (runId/state/health/detail sueltos) es un contrato que no coincide.
+  for (const legacy of ["runId", "state", "health", "detail"] as const) {
+    if (response[legacy] !== undefined) {
+      throw new AlbraBridgeError(
+        "BRIDGE_CONTRACT_MISMATCH",
+        `La respuesta del INSTALADOR no coincide con la V1 canónica: usa el campo de raíz antiguo '${legacy}' (los datos van anidados bajo result).`,
+      )
+    }
   }
   if (response.error !== undefined) {
     const error = response.error as Record<string, unknown>
