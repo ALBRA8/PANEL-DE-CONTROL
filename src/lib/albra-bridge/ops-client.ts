@@ -76,7 +76,7 @@ export function buildOpsRequest(operation: AlbraOperation, productId: string, pa
   }
 }
 
-function validateOpsResponse(value: unknown, request: EecOpsRequest): EecOpsResponse {
+export function validateOpsResponse(value: unknown, request: EecOpsRequest): EecOpsResponse {
   if (!value || typeof value !== "object") {
     throw new AlbraBridgeError("BRIDGE_INVALID_RESPONSE", "El INSTALADOR devolvió una respuesta que no es un objeto.")
   }
