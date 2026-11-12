@@ -156,12 +156,12 @@ export default function AgentsAlbraView() {
           <span
             className={cn(
               'rounded-full border px-2.5 py-1 text-xs font-medium',
-              data?.bridge.configured
+              data?.bridge?.configured
                 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
                 : 'border-red-500/30 bg-red-500/10 text-red-400',
             )}
           >
-            {data?.bridge.configured ? 'INSTALADOR conectado' : 'puente sin configurar'}
+            {data?.bridge?.configured ? 'INSTALADOR conectado' : 'puente sin configurar'}
           </span>
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
             {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
