@@ -18,8 +18,10 @@ export async function GET(req: Request) {
   const bridgeConfigured = Boolean(albraOpsToken())
   let catalog: Array<{ productId: string; displayName: string; latestVersion?: string | null; installable?: boolean; category?: string }> = []
   try {
-    const raw = await fetchAlbraGet<{ items?: unknown[] } | unknown[]>("/api/catalog")
-    const items = Array.isArray(raw) ? raw : raw.items ?? []
+    const raw = await fetchAlbraGet<{ items?: unknown[]; products?: unknown[] } | unknown[]>("/api/catalog")
+    // El INSTALADOR V1 responde { products: [...] } (catálogo del Launcher);
+    // acepta también { items } o array desnudo por tolerancia de contrato.
+    const items = Array.isArray(raw) ? raw : raw.items ?? raw.products ?? []
     catalog = items.map((i) => {
       const o = i as Record<string, unknown>
       return {
