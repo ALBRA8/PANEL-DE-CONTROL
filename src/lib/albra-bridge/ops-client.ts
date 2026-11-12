@@ -150,7 +150,12 @@ export async function executeAlbraOp(
 /** Lectura directa de endpoints de solo lectura del INSTALADOR. */
 export async function fetchAlbraGet<T>(path: string): Promise<T> {
   try {
-    const res = await fetch(`${albraOpsUrl()}${path}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) })
+    const token = albraOpsToken()
+    const res = await fetch(`${albraOpsUrl()}${path}`, {
+      cache: "no-store",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(15_000),
+    })
     if (!res.ok) throw new AlbraBridgeError("BRIDGE_UPSTREAM_ERROR", `INSTALADOR ${path} respondió ${res.status}`, 502)
     return (await res.json()) as T
   } catch (e) {
