@@ -3,7 +3,7 @@
 // requestId/nonce únicos, expiración ≤ 5 min, sin token → error explícito.
 // ============================================================
 import { describe, test, expect } from 'bun:test'
-import { buildOpsRequest, executeAlbraOp, AlbraBridgeError } from '../../src/lib/albra-bridge/ops-client'
+import { buildOpsRequest, executeAlbraOp, AlbraBridgeError, validateOpsResponse } from '../../src/lib/albra-bridge/ops-client'
 
 describe('albra-bridge: contrato de solicitud ops', () => {
   test('requestId y nonce son únicos por solicitud', () => {
@@ -27,6 +27,50 @@ describe('albra-bridge: contrato de solicitud ops', () => {
     expect(withParams.params).toEqual({ dataMode: 'KEEP', purgeData: false })
     const without = buildOpsRequest('STATUS', 'chismoso')
     expect(without.params).toBeUndefined()
+  })
+
+  test('respuesta válida usa result anidado y conserva runId', () => {
+    const request = buildOpsRequest('INSTALL', 'chismoso')
+    const response = validateOpsResponse({
+      contractVersion: '1.0.0',
+      requestId: request.requestId,
+      accepted: true,
+      operation: 'INSTALL',
+      productId: 'chismoso',
+      result: { runId: 'run_12345678' },
+    }, request)
+    expect(response.result?.runId).toBe('run_12345678')
+  })
+
+  test('rechaza respuesta de otra solicitud o con campos de raíz antiguos', () => {
+    const request = buildOpsRequest('STATUS', 'chismoso')
+    expect(() => validateOpsResponse({
+      contractVersion: '1.0.0',
+      requestId: request.requestId,
+      accepted: true,
+      operation: 'STATUS',
+      productId: 'chismoso',
+      state: { state: 'RUNNING' },
+    }, request)).toThrow('no coincide')
+    expect(() => validateOpsResponse({
+      contractVersion: '1.0.0',
+      requestId: 'otro-request-123',
+      accepted: true,
+      operation: 'STATUS',
+      productId: 'chismoso',
+      result: { state: { state: 'RUNNING' } },
+    }, request)).toThrow('no coincide')
+  })
+
+  test('respuesta rechazada exige error estructurado', () => {
+    const request = buildOpsRequest('INSTALL', 'chismoso')
+    expect(() => validateOpsResponse({
+      contractVersion: '1.0.0',
+      requestId: request.requestId,
+      accepted: false,
+      operation: 'INSTALL',
+      productId: 'chismoso',
+    }, request)).toThrow('debe incluir error')
   })
 
   test('sin ALBRA_OPS_TOKEN → BRIDGE_NOT_CONFIGURED (nunca simula)', async () => {
