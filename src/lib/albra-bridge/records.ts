@@ -28,7 +28,8 @@ export async function recordManagedOp(input: {
         errorJson: (response?.error ?? (transportError ? { code: "TRANSPORT_ERROR", message: transportError } : undefined)) as never,
         paramsJson: (paramsJson ?? request.params ?? undefined) as never,
         durationMs: Date.now() - startedAt,
-        resolvedAt: response ? new Date() : null,
+        // An async operation is only ACCEPTED when it returns runId; resolve it only after polling confirms a terminal run state.
+        resolvedAt: response && !result?.runId ? new Date() : null,
       },
     })
   } catch {
