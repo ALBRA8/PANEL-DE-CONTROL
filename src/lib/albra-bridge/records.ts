@@ -44,3 +44,35 @@ export async function listManagedOps(productId?: string, limit = 30) {
     take: limit,
   })
 }
+
+
+/**
+ * Reconciles a persisted PANEL operation with the authoritative lifecycle run
+ * returned by the INSTALADOR. Unknown/non-terminal states never resolve it.
+ */
+export async function syncManagedOpRun(runId: string, run: unknown): Promise<void> {
+  if (!run || typeof run !== "object" || Array.isArray(run)) return
+  const dto = run as Record<string, unknown>
+  if (dto.id !== runId || typeof dto.status !== "string") return
+
+  const terminal: Record<string, string> = {
+    SUCCESS: "SUCCEEDED",
+    WARNING: "SUCCEEDED_WITH_WARNINGS",
+    FAILURE: "FAILED",
+    ROLLED_BACK: "ROLLED_BACK",
+  }
+  const resultCode = terminal[dto.status]
+  if (!resultCode) return
+
+  await db.managedOperation.updateMany({
+    where: { runId, resolvedAt: null },
+    data: {
+      resultCode,
+      resultJson: dto as never,
+      errorJson: dto.status === "FAILURE"
+        ? ({ code: "RUN_FAILED", message: typeof dto.error === "string" ? dto.error : "El run terminó con error." } as never)
+        : undefined,
+      resolvedAt: new Date(),
+    },
+  })
+}
