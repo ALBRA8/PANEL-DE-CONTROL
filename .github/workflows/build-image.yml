@@ -57,7 +57,7 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "Publicando $IMAGE:$v"
 
-      - name: Build & push (multi-tag: versión y sha del commit)
+      - name: "Build & push (multi-tag: versión y sha del commit)"
         uses: docker/build-push-action@v6
         with:
           context: .
