@@ -35,9 +35,19 @@ export function authConfigured(): boolean {
 }
 
 /** Firma de sesión: base64(payload).base64(hmac) con HMAC-SHA256. */
+function sessionSecret(): string {
+  const s = process.env.EEC_SESSION_SECRET
+  if (s && s.length > 0) return s
+  // FAIL-CLOSED en producción: sesiones firmadas jamás usan un secreto
+  // embebido. El fallback dev existe solo para desarrollo sin configurar.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('EEC_SESSION_SECRET es obligatorio en producción (entrypoint Docker y .env del INSTALADOR lo generan)')
+  }
+  return 'eec-insecure-dev-secret'
+}
+
 function sign(payload: string): string {
-  const secret = process.env.EEC_SESSION_SECRET || 'eec-insecure-dev-secret'
-  return createHmac('sha256', secret).update(payload).digest('base64url')
+  return createHmac('sha256', sessionSecret()).update(payload).digest('base64url')
 }
 
 export function createSessionToken(operatorId = 'operator'): string {

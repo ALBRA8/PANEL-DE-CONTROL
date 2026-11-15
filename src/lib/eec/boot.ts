@@ -39,8 +39,11 @@ export async function bootEEC(): Promise<void> {
     providerRegistry.register('AGENT', 'http-agent', new HttpAgentAdapter(), { adapter: 'HttpAgentAdapter' })
   }
   // ---------- FRONTERA INSTALADOR (EEC V2 §7) — honesta por defecto ----------
+  // UN SOLO CONTRATO: el adapter habla el contrato EEC ops del puente real
+  // (ALBRA_OPS_URL/ALBRA_OPS_TOKEN → POST /api/ops). Ya no existe la segunda
+  // frontera /api/v1/managed que el INSTALADOR nunca implementó.
   if (providerRegistry.list('LIFECYCLE').length === 0) {
-    if (process.env.EEC_INSTALLADOR_URL) {
+    if (process.env.ALBRA_OPS_URL) {
       providerRegistry.register('LIFECYCLE', 'instalador-http', new HttpInstaladorAdapter(), { isDefault: true, adapter: 'HttpInstaladorAdapter' })
     } else {
       providerRegistry.register('LIFECYCLE', 'instalador-unavailable', new UnavailableInstaladorAdapter(), { isDefault: true, adapter: 'UnavailableInstaladorAdapter' })
@@ -61,10 +64,13 @@ export async function bootEEC(): Promise<void> {
     if (rec) {
       setSimulationMode(JSON.parse(rec.content).enabled === true)
     } else {
-      setSimulationMode(process.env.EEC_SIMULATION_MODE !== '0')
+      // PRODUCCIÓN POR DEFECTO: sin EEC_SIMULATION_MODE explícito el PANEL
+      // arranca en ejecución REAL. La simulación es opt-in ('1') para demos,
+      // o el toggle humano persistido (system.simulation.toggle).
+      setSimulationMode(process.env.EEC_SIMULATION_MODE === '1')
     }
   } catch {
-    setSimulationMode(process.env.EEC_SIMULATION_MODE !== '0')
+    setSimulationMode(process.env.EEC_SIMULATION_MODE === '1')
   }
 
   // ---------- workers (heartbeat, scheduler, runtime loop…) ----------

@@ -8,6 +8,10 @@ services:
     init: true
     ports:
       - "${PANEL_PORT:-3000}:3000"
+    # host.docker.internal → INSTALADOR en el host (Linux requiere host-gateway;
+    # coincide con el compose generado por el INSTALADOR).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       NODE_ENV: production
       PORT: "3000"
@@ -16,9 +20,12 @@ services:
       EEC_OPERATOR_PASSWORD: ${EEC_OPERATOR_PASSWORD:?Define EEC_OPERATOR_PASSWORD en .env}
       EEC_SESSION_SECRET: ${EEC_SESSION_SECRET:?Define EEC_SESSION_SECRET en .env}
       EEC_API_TOKEN: ${EEC_API_TOKEN:?Define EEC_API_TOKEN en .env}
-      EEC_SIMULATION_MODE: ${EEC_SIMULATION_MODE:-1}
-      EEC_INSTALLADOR_URL: ${EEC_INSTALLADOR_URL:-}
-      EEC_INSTALLADOR_TOKEN: ${EEC_INSTALLADOR_TOKEN:-}
+      # PRODUCCIÓN POR DEFECTO: simulación OFF. Explícita '1' solo para demos.
+      EEC_SIMULATION_MODE: ${EEC_SIMULATION_MODE:-0}
+      # PUENTE REAL hacia el INSTALADOR (contrato EEC ops, Bearer):
+      # el cliente vive en src/lib/albra-bridge/ops-client.ts.
+      ALBRA_OPS_URL: ${ALBRA_OPS_URL:-http://host.docker.internal:3000}
+      ALBRA_OPS_TOKEN: ${ALBRA_OPS_TOKEN:?Define ALBRA_OPS_TOKEN en .env (lo emite el INSTALADOR: scripts/print-ops-token o POST /api/ops/token)}
     volumes:
       - panel-data:/app/data
     healthcheck:

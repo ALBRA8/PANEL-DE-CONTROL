@@ -32,8 +32,27 @@ export async function recordManagedOp(input: {
         resolvedAt: response && !result?.runId ? new Date() : null,
       },
     })
-  } catch {
-    // El registro best-effort no debe convertir una respuesta real en falsa.
+  } catch (e) {
+    // El registro best-effort no debe convertir una respuesta real en falsa,
+    // pero JAMÁS en silencio: evidencia en LogRecord (si la BD responde) y stderr.
+    console.error("[albra-bridge] recordManagedOp falló:", e)
+    try {
+      await db.logRecord.create({
+        data: {
+          level: "error",
+          service: "albra-bridge",
+          message: "recordManagedOp falló — operación real sin registro persistido",
+          contextJson: JSON.stringify({
+            requestId: request.requestId,
+            productId: request.productId,
+            operation: request.operation,
+            error: String(e),
+          }).slice(0, 4000),
+        },
+      })
+    } catch {
+      // La propia BD puede ser la causa del fallo original; no hay más que hacer.
+    }
   }
 }
 

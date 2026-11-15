@@ -1,94 +1,129 @@
 // ============================================================
 // EEC — ADAPTADORES DE LA FRONTERA INSTALADOR (§7)
 //
-// HttpInstaladorAdapter: cliente del INSTALADOR cuando existe
-//   desplegado y configurado (EEC_INSTALLADOR_URL + token).
+// HttpInstaladorAdapter: cliente del INSTALADOR sobre el CONTRATO REAL
+//   del puente (src/lib/albra-bridge/ops-client → POST /api/ops con
+//   Bearer ALBRA_OPS_TOKEN, catálogo /api/catalog, runs /api/runs/{id}).
+//   Un solo contrato entre PANEL e INSTALADOR: el lifecycle del EEC es
+//   una vista del contrato EEC ops, no una segunda frontera paralela.
 // UnavailableInstaladorAdapter (DEFAULT): frontera HONESTA — informa
 //   "no disponible/not_configured"; nunca simula una operación.
 //
-// El EEC no toca tablas internas del INSTALADOR: solo este contrato.
+// REGLA DE HONESTIDAD (contracts/lifecycle.ts): aceptar NO es ejecutar.
+// verified=true SOLO cuando la respuesta del INSTALADOR incluye un
+// resultado concluyente (estado final o health completo); un runId de
+// operación asíncrona queda verified=false hasta que el polling del run
+// (syncManagedOpRun) confirme estado terminal.
 // ============================================================
 import type {
   InstaladorInterface, LifecycleOperation, LifecycleOperationResult,
   LifecycleStatus, LifecycleUnavailable, ManagedRef,
 } from '../../contracts/lifecycle'
 import { LIFECYCLE_CONTRACT_VERSION } from '../../contracts/lifecycle'
+import { executeAlbraOp, fetchAlbraGet, albraOpsUrl, type AlbraOperation } from '../../../albra-bridge/ops-client'
 
-const TIMEOUT_MS = 10_000
+const LIFECYCLE_TO_OPS: Record<LifecycleOperation, AlbraOperation> = {
+  install: 'INSTALL',
+  configure: 'UPDATE',
+  start: 'START',
+  stop: 'STOP',
+  restart: 'RESTART',
+  upgrade: 'UPDATE',
+  repair: 'DIAGNOSTICS',
+  backup: 'BACKUP',
+  rollback: 'ROLLBACK',
+  status: 'STATUS',
+}
 
-interface ReqInit { method: string; path: string; body?: unknown; correlationId?: string }
+/** Resultados del contrato ops que ya traen conclusión verificable. */
+function resultIsConclusive(op: AlbraOperation, result: Record<string, unknown>): boolean {
+  if (result.health !== undefined || result.state !== undefined) return true
+  if (op === 'INSTALL' || op === 'UPDATE' || op === 'ROLLBACK' || op === 'UNINSTALL') return false // asíncronas: runId → polling
+  return Object.keys(result).length > 0
+}
+
+
+/** El catálogo puede venir como {products:[...]}, {items:[...]} o array (tolerante, como la vista Agentes ALBRA). */
+function extractProducts(catalog: unknown): Array<{ productId?: string; state?: string }> {
+  if (Array.isArray(catalog)) return catalog as Array<{ productId?: string; state?: string }>
+  if (catalog && typeof catalog === 'object') {
+    const rec = catalog as { products?: unknown; items?: unknown }
+    const list = Array.isArray(rec.products) ? rec.products : Array.isArray(rec.items) ? rec.items : []
+    return list as Array<{ productId?: string; state?: string }>
+  }
+  return []
+}
 
 export class HttpInstaladorAdapter implements InstaladorInterface {
   readonly contractVersion = LIFECYCLE_CONTRACT_VERSION
   readonly providerKey = 'instalador-http'
 
-  private base(): { url: string; token?: string } | null {
-    const url = process.env.EEC_INSTALLADOR_URL
-    if (!url) return null
-    return { url: url.replace(/\/$/, ''), token: process.env.EEC_INSTALLADOR_TOKEN }
-  }
-
-  private async call<T>({ method, path, body, correlationId }: ReqInit): Promise<{ ok: true; data: T } | { ok: false; reason: LifecycleUnavailable['reason']; detail?: string }> {
-    const cfg = this.base()
-    if (!cfg) return { ok: false, reason: 'not_configured' }
-    const ac = new AbortController()
-    const t = setTimeout(() => ac.abort(), TIMEOUT_MS)
-    try {
-      const res = await fetch(`${cfg.url}${path}`, {
-        method,
-        headers: {
-          'content-type': 'application/json',
-          ...(cfg.token ? { authorization: `Bearer ${cfg.token}` } : {}),
-          'x-eec-contract': `eec.instalador/${LIFECYCLE_CONTRACT_VERSION}`,
-          ...(correlationId ? { 'x-eec-correlation-id': correlationId } : {}),
-        },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-        signal: ac.signal,
-      })
-      if (res.status === 404) return { ok: false, reason: 'rejected', detail: 'operación o referencia desconocida para el INSTALADOR' }
-      if (res.status === 426) return { ok: false, reason: 'version_incompatible', detail: await res.text().catch(() => '') }
-      if (!res.ok) return { ok: false, reason: 'rejected', detail: `status_${res.status}` }
-      const json = (await res.json().catch(() => null)) as T | null
-      if (json === null) return { ok: false, reason: 'unreachable', detail: 'respuesta no JSON' }
-      return { ok: true, data: json }
-    } catch (e) {
-      const msg = e instanceof Error ? (e.name === 'AbortError' ? 'timeout' : e.message) : 'network'
-      return { ok: false, reason: msg === 'timeout' ? 'timeout' : 'unreachable', detail: msg }
-    } finally {
-      clearTimeout(t)
-    }
+  private unavailable(): LifecycleUnavailable {
+    const configured = Boolean(process.env.ALBRA_OPS_URL)
+    return configured
+      ? { available: false, reason: 'unreachable', detail: `INSTALADOR configurado en ${albraOpsUrl()} pero no respondió (¿revisa ALBRA_OPS_TOKEN y que el servicio esté arriba?)` }
+      : { available: false, reason: 'not_configured', detail: 'frontera INSTALADOR preparada (contrato EEC ops/1.0.0); configure ALBRA_OPS_URL + ALBRA_OPS_TOKEN para activarla' }
   }
 
   async listManaged() {
-    const r = await this.call<{ refs?: Array<ManagedRef & { state?: string }> }>({ method: 'GET', path: '/api/v1/managed' })
-    if (!r.ok) return { available: false as const, reason: r.reason, detail: r.detail }
-    if (!Array.isArray(r.data.refs)) return { available: false as const, reason: 'unreachable' as const, detail: 'respuesta malformada' }
-    return { available: true as const, refs: r.data.refs }
+    if (!albraOpsUrl()) return { available: false as const, reason: 'not_configured' as const, detail: 'ALBRA_OPS_URL sin configurar' }
+    try {
+      const catalog = await fetchAlbraGet<unknown>('/api/catalog')
+      const products = extractProducts(catalog)
+      const refs = products
+        .filter(p => typeof p.productId === 'string' && p.productId.length > 0)
+        .map(p => ({ ref: p.productId as string, kind: 'PRODUCT' as const, ...(p.state ? { state: p.state } : {}) }))
+      return { available: true as const, refs }
+    } catch (e) {
+      const err = e as { code?: string; message?: string }
+      return { available: false as const, reason: 'unreachable' as const, detail: err.message ?? 'INSTALADOR no accesible' }
+    }
   }
 
   async getStatus(ref: ManagedRef): Promise<LifecycleStatus | LifecycleUnavailable> {
-    const r = await this.call<{ state?: unknown; detail?: unknown }>({ method: 'GET', path: `/api/v1/managed/${encodeURIComponent(ref.ref)}` })
-    if (!r.ok) return { available: false, reason: r.reason, detail: r.detail }
-    if (typeof r.data.state !== 'string') return { available: false, reason: 'unreachable', detail: 'respuesta malformada' }
-    return { available: true, ref: ref.ref, state: r.data.state, observedAt: new Date().toISOString(), detail: r.data.detail as Record<string, unknown> | undefined }
+    try {
+      const { response } = await executeAlbraOp('STATUS', ref.ref)
+      if (!response || !response.accepted) {
+        return { available: false, reason: 'rejected', detail: response?.error?.message ?? 'operación rechazada por el INSTALADOR' }
+      }
+      const state = (response.result?.state as { state?: string } | undefined)?.state
+      return {
+        available: true,
+        ref: ref.ref,
+        state: typeof state === 'string' ? state : 'UNKNOWN',
+        observedAt: new Date().toISOString(),
+        detail: (response.result?.state as Record<string, unknown> | undefined),
+      }
+    } catch (e) {
+      const err = e as { code?: string; message?: string }
+      if (err.code === 'BRIDGE_NOT_CONFIGURED') return { available: false, reason: 'not_configured', detail: err.message }
+      return { available: false, reason: 'unreachable', detail: err.message ?? 'INSTALADOR no accesible' }
+    }
   }
 
   async requestOperation(op: LifecycleOperation, ref: ManagedRef, opts?: { correlationId?: string; params?: Record<string, unknown> }): Promise<LifecycleOperationResult | LifecycleUnavailable> {
-    const r = await this.call<{ operationId?: unknown; state?: unknown; verified?: unknown; detail?: unknown }>({
-      method: 'POST', path: `/api/v1/managed/${encodeURIComponent(ref.ref)}/operations`,
-      body: { op, params: opts?.params ?? {} }, correlationId: opts?.correlationId,
-    })
-    if (!r.ok) return { available: false, reason: r.reason, detail: r.detail }
-    if (typeof r.data.operationId !== 'string' || typeof r.data.state !== 'string') {
-      return { available: false, reason: 'unreachable', detail: 'respuesta malformada (sin operationId)' }
-    }
-    return {
-      available: true,
-      operationId: r.data.operationId,
-      // verificable SOLO si el INSTALADOR devolvió conclusión explícita:
-      verified: r.data.verified === true,
-      state: r.data.state,
-      detail: r.data.detail as Record<string, unknown> | undefined,
+    const mapped = LIFECYCLE_TO_OPS[op] ?? 'STATUS'
+    try {
+      const { request, response } = await executeAlbraOp(mapped, ref.ref, opts?.params)
+      if (!response || !response.accepted) {
+        return { available: false, reason: 'rejected', detail: response?.error?.message ?? response?.error?.code ?? 'operación rechazada por el INSTALADOR' }
+      }
+      const result = (response.result ?? {}) as Record<string, unknown>
+      const runId = typeof result.runId === 'string' ? result.runId : undefined
+      return {
+        available: true,
+        operationId: runId ?? request.requestId,
+        // verificable SOLO si el INSTALADOR devolvió conclusión explícita;
+        // runId asíncrono → verified=false hasta confirmación por polling.
+        verified: resultIsConclusive(mapped, result),
+        state: runId ? 'ACCEPTED' : 'EXECUTED',
+        detail: result as Record<string, unknown>,
+      }
+    } catch (e) {
+      const err = e as { code?: string; message?: string }
+      if (err.code === 'BRIDGE_NOT_CONFIGURED') return { available: false, reason: 'not_configured', detail: err.message }
+      if (err.code === 'BRIDGE_UPSTREAM_ERROR') return { available: false, reason: 'unreachable', detail: err.message }
+      return { available: false, reason: 'unreachable', detail: err.message ?? 'INSTALADOR no accesible' }
     }
   }
 }
@@ -99,7 +134,7 @@ export class UnavailableInstaladorAdapter implements InstaladorInterface {
   readonly providerKey = 'instalador-unavailable'
 
   private unavailable(): LifecycleUnavailable {
-    return { available: false, reason: 'not_configured', detail: 'frontera INSTALADOR preparada (contrato eec.instalador/1.0.0); configure EEC_INSTALLADOR_URL para activarla' }
+    return { available: false, reason: 'not_configured', detail: 'frontera INSTALADOR preparada (contrato EEC ops/1.0.0); configure ALBRA_OPS_URL + ALBRA_OPS_TOKEN para activarla' }
   }
 
   async listManaged() {

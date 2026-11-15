@@ -114,7 +114,7 @@ export async function runDoctor(): Promise<DoctorReport> {
   checks.push(await timed('instalador-boundary', 'Frontera INSTALADOR (ciclo de vida)', async () => {
     const life = providerRegistry.list('LIFECYCLE')
     const unavailable = life.find(p => p.key === 'instalador-unavailable')
-    if (unavailable) return { status: 'WARN', detail: 'EEC_INSTALLADOR_URL sin configurar: registro/baja de agentes vía INSTALADOR NO disponible (frontera honesta, no simulada)' }
+    if (unavailable) return { status: 'WARN', detail: 'ALBRA_OPS_URL sin configurar: registro/baja de agentes vía INSTALADOR NO disponible (frontera honesta, no simulada)' }
     return { status: 'OK', detail: `LIFECYCLE: ${life.map(p => p.key).join(', ')}` }
   }))
 
