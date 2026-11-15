@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server"
 import { resolveRequester } from "@/lib/eec/security/auth"
 import { fetchAlbraGet } from "@/lib/albra-bridge/ops-client"
+import { syncManagedOpRun } from "@/lib/albra-bridge/records"
 
 export const dynamic = "force-dynamic"
 
@@ -20,6 +21,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ runId: string }
   }
   try {
     const run = await fetchAlbraGet<unknown>(`/api/runs/${runId}`)
+    await syncManagedOpRun(runId, run)
     return NextResponse.json(run)
   } catch (e) {
     const err = e as { code?: string; message?: string; status?: number }
